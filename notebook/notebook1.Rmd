@@ -8,7 +8,107 @@ date: "2025-04-15"
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+## CHECK DIFFERENTIAL EXPRESSION ASTROCYTES AND MICROGLIA
+ 
+Load library
 ```{r}
-print('hi')
+library(dplyr)
+library(SeuratObject)
+library(Seurat)
+library(ggplot2)
+library(SingleCellExperiment)
+library(tidyr)
+```
+ 
+Using obj.RData from /pipseq/data which is from line 0 to line 212 from Ellie's notebook include all the data from Single Cell folder
+
+```{r}
+#check meta data(data that describes other data) columns
+colnames(obj@meta.data)
+```
+```{r}
+#check few rows of meta data result
+head(obj@meta.data)
+```
+```{r}
+Idents(obj) %>% head()
+levels(Idents(obj))
+```
+```{r}
+UMAP_cluster_ids <- c(
+  "0" = "Oligodendrocytes",
+  "1" = "L2/3IT",
+  "2" = "L5IT",
+  "3" = "L6IT",
+  "4" = "L5ET",
+  "5" = "Microglia",
+  "6" = "Astrocytes", 
+  "7" = "L6CT",
+  "8" = "VIP/Lamp5IN",
+  "9" = "L2/3IT",
+  "10" = "SST/PVIN",
+  "11" = "Oligodendrocytes",
+  "12" = "OPC",
+  "13" = "L5/6NP",
+  "14" = "Microglia",
+  "15" = "Astrocytes", 
+  "16" = "VLMC",
+  "17" = "Endo",
+  "18" = "VLMC",
+  "19" = "Pericytes", 
+  "20" = "L2/3IT",
+  "21" = "Microglia"
+)
+
+names(UMAP_cluster_ids) <- levels(obj)
+obj <- RenameIdents(obj, UMAP_cluster_ids)
+```
+
+```{r}
+Idents(obj) %>% head()
+levels(Idents(obj))
+```
+```{r}
+table(Idents(obj))
+```
+
+
+```{r}
+astro <- subset(obj, idents = "Astrocytes")
+micro <- subset(obj, idents = "Microglia")
+ncol(astro)
+ncol(micro)
+
+```
+
+```{r}
+DefaultAssay(astro)  # 查看当前使用的 assay 名
+Assays(astro)   
+slotNames(astro[["RNA"]])  # 查看 RNA assay 是否有 counts slot
+```
+
+```{r}
+table(Idents(obj))
+```
+
+
+
+```{r}
+astro_micro_de <- FindMarkers(
+  obj,
+  ident.1 = "Astrocytes",
+  ident.2 = "Microglia",
+  logfc.threshold = 0,     # 去掉 log fold change 限制
+  min.pct = 0,             # 不过滤低表达基因
+  test.use = "wilcox"      # 默认检验方法
+)
+
+# 检查结果并展示前几行
+if (!is.null(astro_micro_de)) {
+  astro_micro_de_sorted <- astro_micro_de[order(astro_micro_de$p_val_adj), ]
+  head(astro_micro_de_sorted)
+} else {
+  message("error")
+}
 ```
 
