@@ -17,25 +17,36 @@ library(ggplot2)
 ```
 
 ```{r}
-#using 15 PCs causes clusters 3 and 0 to disappear from pseudotime trajectory
-#17 PCs missing cluster 1
-OLOPC_19_fix <- RunTSNE(OLOPC_19_fix, dims = 1:20)
+#visually decide how many PCs to keep
+ElbowPlot(OLOPC_19_fix, ndims = 40)
 ```
 
 ```{r}
+#using 15 PCs causes clusters 3 and 0 to disappear from pseudotime trajectory
+#17 PCs missing cluster 1
+#20 PCs?
+OLOPC_19_fix <- RunTSNE(OLOPC_19_fix, dims = 1:20)
+```
+
+
+```{r}
+# Convert Seurat object to SingleCellExperiment, assign cluster labels
 sce <- as.SingleCellExperiment(OLOPC_19_fix)
 sce$cluster <- OLOPC_19_fix$seurat_clusters  # use Seurat cluster info
 ```
 
 ```{r}
+#runs the Slingshot pseudotime
 sce <- slingshot(sce, clusterLabels = 'cluster', reducedDim = 'TSNE')
 ```
 
 ```{r}
+#Transfers the pseudotime values computed by Slingshot into Seurat object.
 OLOPC_19_fix$pseudotime <- sce$slingPseudotime_1
 ```
 
 ```{r}
+#Plots cells in t-SNE space, colored by pseudotime
 FeaturePlot(OLOPC_19_fix, feature = "pseudotime", reduction = "tsne") +
   scale_color_viridis_c() +
   ggtitle("Pseudotime Progression (tSNE)") +
@@ -43,6 +54,7 @@ FeaturePlot(OLOPC_19_fix, feature = "pseudotime", reduction = "tsne") +
 ```
 
 ```{r}
+#add trajectory, but it did not visualized well
 # Get tSNE coords
 tsne_coords <- reducedDim(sce, "TSNE")
 
@@ -54,9 +66,9 @@ plot(tsne_coords, col = viridis::viridis(100)[cut(sce$slingPseudotime_1, 100)],
      pch = 16, asp = 1, main = "Slingshot Trajectory")
 lines(curve_data, lwd = 2, col = 'black')
 ```
-
+Want to add cluster label on the plot
 ```{r}
-# 转成 data.frame 并命名
+#converts t-SNE coordinates into a data frame
 tsne_coords <- as.data.frame(tsne_coords)
 colnames(tsne_coords) <- c("tSNE_1", "tSNE_2")
 
@@ -64,6 +76,7 @@ colnames(tsne_coords) <- c("tSNE_1", "tSNE_2")
 
 
 ```{r}
+#adds Slingshot pseudotime and cluster to each row cell
 tsne_coords$pseudotime <- sce$slingPseudotime_1
 tsne_coords$cluster <- sce$cluster
 write.csv(tsne_coords, "tsne_coords.csv", row.names = TRUE)
@@ -89,4 +102,5 @@ ggplot(tsne_coords, aes(x = tSNE_1, y = tSNE_2, color = pseudotime)) +
   ggtitle("pseudotime progression tSNE plot") +
   theme(plot.title = element_text(hjust = 0.5, face = "bold"))
 ```
+
 
