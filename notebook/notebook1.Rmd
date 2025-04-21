@@ -10,9 +10,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ## CHECK DIFFERENTIAL EXPRESSION ASTROCYTES AND MICROGLIA
  
-Load library
-```{r}
-library(dplyr)
+```{r Load library}
 library(SeuratObject)
 library(Seurat)
 library(ggplot2)
@@ -31,10 +29,15 @@ colnames(obj@meta.data)
 head(obj@meta.data)
 ```
 ```{r}
+# View the cluster identity assigned to the first few cells in the Seurat object.
 Idents(obj) %>% head()
+
+# Display all the unique cluster levels currently present in the object.
 levels(Idents(obj))
 ```
 ```{r}
+#this renaming part copy from Ellie's code, assume all correct, find cluster of microglia and astrocytes
+
 UMAP_cluster_ids <- c(
   "0" = "Oligodendrocytes",
   "1" = "L2/3IT",
@@ -59,12 +62,23 @@ UMAP_cluster_ids <- c(
   "20" = "L2/3IT",
   "21" = "Microglia"
 )
-
+Idents(obj) <- obj$seurat_clusters
 names(UMAP_cluster_ids) <- levels(obj)
 obj <- RenameIdents(obj, UMAP_cluster_ids)
 ```
 
 ```{r}
+DimPlot(
+  obj,
+  reduction = "umap.unintegrated",
+  group.by = "condition",
+  label = FALSE, # Adds the subclass name to the plot
+  label.size = 4 # Adjusts the font size of the labels
+)
+```
+
+```{r}
+#check if renaming works
 Idents(obj) %>% head()
 levels(Idents(obj))
 ```
@@ -72,43 +86,75 @@ levels(Idents(obj))
 table(Idents(obj))
 ```
 
-
 ```{r}
-astro <- subset(obj, idents = "Astrocytes")
-micro <- subset(obj, idents = "Microglia")
-ncol(astro)
-ncol(micro)
-
+#group clusters 
+microglia  <- subset(obj, idents = "Microglia")
+astrocytes <- subset(obj, idents = "Astrocytes")
 ```
 
 ```{r}
-DefaultAssay(astro)  # 查看当前使用的 assay 名
-Assays(astro)   
-slotNames(astro[["RNA"]])  # 查看 RNA assay 是否有 counts slot
+# Subset microglia and astrocytes to only include those with fewer than 3000 detected genes
+microglia <- subset(microglia, nFeature_RNA < 3000)
+table(microglia$orig.ident)
+astrocytes <- subset(astrocytes, nFeature_RNA < 3000)
+table(astrocytes$orig.ident)
+```
+```{r}
+Assays(microglia)
+Assays(astrocytes)
+```
+```{r}
+#create seurat object by using slot = data
+microglia <- CreateSeuratObject(counts = GetAssayData(microglia, layer = "data"))
+astrocytes <- CreateSeuratObject(counts = GetAssayData(astrocytes, layer = "data"))
 ```
 
 ```{r}
-table(Idents(obj))
+#Normalize microglia
+microglia <- NormalizeData(microglia)
+microglia <- FindVariableFeatures(microglia)
+microglia <- ScaleData(microglia)
+microglia <- RunPCA(microglia)
+microglia <- FindNeighbors(microglia, dims = 1:15)
+microglia <- FindClusters(microglia, resolution = 0.3)
+microglia <- RunUMAP(microglia, dims = 1:15)
 ```
 
-
+```{r}
+#Normalize astrocytes
+astrocytes <- NormalizeData(astrocytes)
+astrocytes <- FindVariableFeatures(astrocytes)
+astrocytes <- ScaleData(astrocytes)
+astrocytes <- RunPCA(astrocytes)
+astrocytes <- FindNeighbors(astrocytes, dims = 1:15)
+astrocytes <- FindClusters(astrocytes, resolution = 0.3)
+astrocytes <- RunUMAP(astrocytes, dims = 1:15)
+```
 
 ```{r}
+#cell type label for each subset
+astrocytes$celltype <- "Astrocytes"
+microglia$celltype <- "Microglia"
+```
+
+```{r}
+#merges the astrocytes and microglia Seurat objects into a single object
+combined_obj <- merge(astrocytes, y = microglia)
+Idents(combined_obj) <- combined_obj$celltype
+```
+
+```{r}
+#compares astrocytes vs. microglia to identify differentially expressed genes
 astro_micro_de <- FindMarkers(
-  obj,
+  combined_obj,
   ident.1 = "Astrocytes",
   ident.2 = "Microglia",
-  logfc.threshold = 0,     # 去掉 log fold change 限制
-  min.pct = 0,             # 不过滤低表达基因
-  test.use = "wilcox"      # 默认检验方法
+  logfc.threshold = 0.25,    
+  min.pct = 0.1,              
+  test.use = "wilcox"        
 )
-
-# 检查结果并展示前几行
-if (!is.null(astro_micro_de)) {
-  astro_micro_de_sorted <- astro_micro_de[order(astro_micro_de$p_val_adj), ]
-  head(astro_micro_de_sorted)
-} else {
-  message("error")
-}
 ```
-
+```{r}
+astro_micro_de_sorted <- astro_micro_de[order(astro_micro_de$p_val_adj), ]
+head(astro_micro_de_sorted, 20) 
+```
