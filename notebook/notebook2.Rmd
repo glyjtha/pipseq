@@ -1,0 +1,92 @@
+---
+title: "notebook2"
+output: html_document
+date: "2025-04-21"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load needed library}
+# Load libraries
+library(SingleCellExperiment)
+library(slingshot)
+library(Seurat)
+library(ggplot2)
+```
+
+```{r}
+#using 15 PCs causes clusters 3 and 0 to disappear from pseudotime trajectory
+#17 PCs missing cluster 1
+OLOPC_19_fix <- RunTSNE(OLOPC_19_fix, dims = 1:20)
+```
+
+```{r}
+sce <- as.SingleCellExperiment(OLOPC_19_fix)
+sce$cluster <- OLOPC_19_fix$seurat_clusters  # use Seurat cluster info
+```
+
+```{r}
+sce <- slingshot(sce, clusterLabels = 'cluster', reducedDim = 'TSNE')
+```
+
+```{r}
+OLOPC_19_fix$pseudotime <- sce$slingPseudotime_1
+```
+
+```{r}
+FeaturePlot(OLOPC_19_fix, feature = "pseudotime", reduction = "tsne") +
+  scale_color_viridis_c() +
+  ggtitle("Pseudotime Progression (tSNE)") +
+  theme_minimal()
+```
+
+```{r}
+# Get tSNE coords
+tsne_coords <- reducedDim(sce, "TSNE")
+
+# Get curve data
+curve_data <- slingCurves(sce)[[1]]
+
+# Plot with curve
+plot(tsne_coords, col = viridis::viridis(100)[cut(sce$slingPseudotime_1, 100)],
+     pch = 16, asp = 1, main = "Slingshot Trajectory")
+lines(curve_data, lwd = 2, col = 'black')
+```
+
+```{r}
+# 转成 data.frame 并命名
+tsne_coords <- as.data.frame(tsne_coords)
+colnames(tsne_coords) <- c("tSNE_1", "tSNE_2")
+
+```
+
+
+```{r}
+tsne_coords$pseudotime <- sce$slingPseudotime_1
+tsne_coords$cluster <- sce$cluster
+write.csv(tsne_coords, "tsne_coords.csv", row.names = TRUE)
+```
+
+```{r}
+label_positions <- aggregate(cbind(tSNE_1, tSNE_2) ~ cluster, data = tsne_coords, FUN = mean)
+
+```
+
+```{r}
+library(viridis)
+library(ggrepel)
+
+ggplot(tsne_coords, aes(x = tSNE_1, y = tSNE_2, color = pseudotime)) +
+  geom_point(size = 1.2, alpha = 0.7) +
+  geom_path(data = as.data.frame(curve_data$s), aes(x = tSNE_1, y = tSNE_2), color = "black", size = 1.2) +
+  geom_text_repel(data = label_positions,
+                  aes(x = tSNE_1, y = tSNE_2, label = cluster),
+                  size = 5, color = "black", fontface = "bold") +
+  scale_color_viridis(name = "Pseudotime", option = "D") +
+  theme_minimal(base_size = 14) +
+  ggtitle("pseudotime progression tSNE plot") +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+```
+
