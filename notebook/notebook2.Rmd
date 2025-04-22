@@ -122,11 +122,166 @@ gg
 
 ```
 ```{r}
+```
+
+
+```{r}
+#trajectory using number label of the clusters
+library(shadowtext)
+
 label_positions <- aggregate(cbind(tSNE_1, tSNE_2) ~ cluster, data = tsne_df, FUN = mean)
-gg <- gg + geom_text_repel(data = label_positions,
-                           aes(x = tSNE_1, y = tSNE_2, label = cluster),
-                           size = 5, color = "black", fontface = "bold")
+gg <- gg + shadowtext::geom_shadowtext(
+    data = label_positions,
+    aes(x = tSNE_1, y = tSNE_2, label = cluster),
+    size = 5,
+    color = "black",
+    bg.color = "white", 
+    fontface = "bold")
 gg
 ```
 
 
+```{r}
+#check condition name
+unique(OLOPC_19_fix@meta.data$condition)
+```
+```{r}
+#rowname is the condition in tsne_df, format as e.g.tamA_AAAAAAAGGTTGGTTA
+#filter
+tsne_df$condition <- sub("_.*", "", rownames(tsne_df))
+
+# used dictionary to map the standard condition given in OLOPC_19_subs
+tsne_df$condition_grouped <- dplyr::case_when(
+  grepl("^bex", tsne_df$condition) ~ "bex",
+  grepl("^cpz", tsne_df$condition) ~ "cpz",
+  grepl("^naive", tsne_df$condition) ~ "naive",
+  grepl("^tam", tsne_df$condition) & !grepl("tambex", tsne_df$condition) ~ "tam",
+  grepl("^tambex1wk", tsne_df$condition) ~ "tambex1wk",
+  grepl("^tambex", tsne_df$condition) ~ "tambex",
+  grepl("^veh1wk", tsne_df$condition) ~ "veh1wk",
+  grepl("^veh", tsne_df$condition) ~ "veh",
+  TRUE ~ "other"
+)
+```
+
+
+```{r}
+#plot condition tSNE plot with many colors
+ggplot(tsne_df, aes(x = tSNE_1, y = tSNE_2, color = condition_grouped)) +
+  geom_point(size = 0.7, alpha = 0.6) +
+  theme_minimal(base_size = 14) +
+  ggtitle("tSNE Plot Colored by Condition") +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    legend.title = element_text(face = "bold")
+  ) +
+  scale_color_brewer(palette = "Set1")
+
+```
+
+```{r}
+
+conditions <- unique(tsne_df$condition_grouped)
+#write a function to plot 1 condition at a time, other conditions in grey
+plots <- lapply(conditions, function(cond) {
+  tsne_df %>%
+    dplyr::mutate(color_flag = ifelse(condition_grouped == cond, cond, "Other")) %>%
+    ggplot(aes(x = tSNE_1, y = tSNE_2)) +
+    
+    # First draw grey background
+    geom_point(data = ~subset(., color_flag == "Other"), color = "grey80", size = 1.2, alpha = 0.5) +
+    
+    # Then draw colored condition on top
+    geom_point(data = ~subset(., color_flag == cond), color = "blue", size = 1.2, alpha = 0.9) +
+    
+    theme_minimal(base_size = 14) +
+    ggtitle(paste("tSNE Condition Plot -", cond)) +
+    theme(
+      plot.title = element_text(hjust = 0.5, face = "bold"),
+      legend.position = "none"
+    )
+})
+
+```
+
+#showing plots format in print(plots[[index]])
+
+```{r}
+print(plots[[1]])
+
+```
+
+```{r}
+print(plots[[2]])
+```
+
+```{r}
+print(plots[[3]])
+```
+
+```{r}
+print(plots[[4]])
+```
+
+```{r}
+print(plots[[5]])
+```
+
+```{r}
+print(plots[[6]])
+```
+
+```{r}
+print(plots[[7]])
+```
+
+```{r}
+print(plots[[8]])
+```
+
+
+
+```{r}
+#required genes expression for colored plots
+genes_to_plot <- c("Il33", "Mal", "Apod", "Daam2", "Ankub1", "Plekhh1", "Adipor2")
+
+#write a function to plot
+plots <- lapply(genes_to_plot, function(gene) {
+  FeaturePlot(
+    OLOPC_19_fix,
+    features = gene,
+    reduction = "tsne",
+  ) +
+    scale_color_gradient(low = "grey95", high = "darkblue", limits = c(0, 5))+
+    ggtitle(paste(gene, "Expression on tSNE")) +
+    theme_minimal(base_size = 16)
+})
+
+```
+```{r}
+print(plots[[1]])
+```
+
+```{r}
+print(plots[[2]])
+```
+
+```{r}
+print(plots[[3]])
+```
+
+```{r}
+print(plots[[4]])
+```
+
+```{r}
+print(plots[[5]])
+```
+
+```{r}
+print(plots[[6]])
+```
+
+```{r}
+print(plots[[7]])
+```
