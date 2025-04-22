@@ -88,19 +88,45 @@ label_positions <- aggregate(cbind(tSNE_1, tSNE_2) ~ cluster, data = tsne_coords
 ```
 
 ```{r}
-library(viridis)
-library(ggrepel)
+curve_list <- slingCurves(sce)
 
-ggplot(tsne_coords, aes(x = tSNE_1, y = tSNE_2, color = pseudotime)) +
+```
+
+```{r}
+tsne_coords <- reducedDim(sce, "TSNE")
+tsne_df <- as.data.frame(tsne_coords)
+colnames(tsne_df) <- c("tSNE_1", "tSNE_2")
+tsne_df$pseudotime1 <- sce$slingPseudotime_1
+tsne_df$cluster <- sce$cluster
+pseudotime_mat <- slingPseudotime(sce)
+tsne_df$avg_pseudotime <- rowMeans(pseudotime_mat, na.rm = TRUE)
+
+```
+
+```{r}
+gg <- ggplot(tsne_df, aes(x = tSNE_1, y = tSNE_2, color = avg_pseudotime)) +
   geom_point(size = 1.2, alpha = 0.7) +
-  geom_path(data = as.data.frame(curve_data$s), aes(x = tSNE_1, y = tSNE_2), color = "black", size = 1.2) +
-  geom_text_repel(data = label_positions,
-                  aes(x = tSNE_1, y = tSNE_2, label = cluster),
-                  size = 5, color = "black", fontface = "bold") +
   scale_color_viridis(name = "Pseudotime", option = "D") +
-  theme_minimal(base_size = 14) +
-  ggtitle("pseudotime progression tSNE plot") +
-  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+  ggtitle("Multiple Slingshot Trajectories (tSNE)") +
+  theme_minimal(base_size = 14)
+
+# Add all trajectory lines
+for (i in seq_along(curve_list)) {
+  curve_i <- as.data.frame(curve_list[[i]]$s)
+  colnames(curve_i) <- c("tSNE_1", "tSNE_2")
+  gg <- gg + geom_path(data = curve_i, aes(x = tSNE_1, y = tSNE_2),
+                       color = "black", size = 1.2)
+}
+
+gg
+
+```
+```{r}
+label_positions <- aggregate(cbind(tSNE_1, tSNE_2) ~ cluster, data = tsne_df, FUN = mean)
+gg <- gg + geom_text_repel(data = label_positions,
+                           aes(x = tSNE_1, y = tSNE_2, label = cluster),
+                           size = 5, color = "black", fontface = "bold")
+gg
 ```
 
 
