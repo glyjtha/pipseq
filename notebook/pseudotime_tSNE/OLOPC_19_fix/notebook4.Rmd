@@ -1,0 +1,133 @@
+---
+title: "notebook4"
+output: html_document
+date: "2025-04-22"
+---
+##DPT Diffusion Pseudotime 
+
+```{r}
+#using 15 PCs causes clusters 3 and 0 to disappear from pseudotime trajectory
+#17 PCs missing cluster 1
+#20 PCs?
+OLOPC_19_fix <- RunTSNE(OLOPC_19_fix, dims = 1:20)
+```
+
+
+```{r}
+# Convert Seurat object to SingleCellExperiment, assign cluster labels
+sce <- as.SingleCellExperiment(OLOPC_19_fix)
+sce$cluster <- OLOPC_19_fix$seurat_clusters  # use Seurat cluster info
+```
+
+```{r}
+#runs the Slingshot pseudotime
+sce <- slingshot(sce, clusterLabels = 'cluster', reducedDim = 'TSNE')
+```
+
+
+```{r}
+pseudotime_matrix <- slingPseudotime(sce)  # matrix: cells x lineages
+head(pseudotime_matrix)
+
+# If you want pseudotime from the first lineage:
+sce$pseudotime <- pseudotime_matrix[, 1]
+```
+
+```{r}
+library(destiny)
+```
+
+```{r}
+logcounts_matrix <- as.matrix(assay(sce, "logcounts"))
+dm <- DiffusionMap(t(logcounts_matrix), n_pcs = 50)
+
+dpt <- DPT(dm)
+sce$dpt <- dpt$DPT1
+sce$dpt <- dpt$DPT1
+```
+
+```{r}
+tmp <- data.frame(
+  DC1 = eigenvectors(dm)[, 1],
+  DC2 = eigenvectors(dm)[, 2],
+  Timepoint = sce$condition
+)
+ggplot(tmp, aes(x = DC1, y = DC2, color = Timepoint)) +
+  geom_point(size = 0.8) +
+  theme_classic() +
+  ggtitle("Seurat_Cluster")
+
+```
+
+```{r}
+ggplot(tmp, aes(x = DC1, y = DC2, color = Timepoint)) +
+  geom_point(size = 0.3) +
+  facet_wrap(~Timepoint) +   # 👈 关键一行
+  theme_classic() +
+  ggtitle("Diffusion Map by Condition")
+
+```
+
+
+
+```{r}
+#filter OPC cluster and naive condition
+sce$composite_label <- ifelse(
+  OLOPC_19_fix@meta.data$cluster == "OPC" & sce$condition == "naive",
+  "OPC_naive",
+  as.character(sce$cluster)  # keep others unchanged
+)
+```
+
+```{r}
+sce <- slingshot(
+  sce,
+  clusterLabels = 'composite_label',
+  reducedDim = 'TSNE',
+  start.clus = 'OPC_naive'    # this now explicitly uses OPC in naive condition
+)
+```
+
+```{r}
+pseudotime_matrix_new <- slingPseudotime(sce)
+sce$pseudotime_new <- pseudotime_matrix_new[, 1] 
+```
+
+
+```{r}
+class(colData(sce))
+
+```
+
+```{r}
+tsne_coords <- reducedDim(sce, "TSNE")
+tsne_df <- as.data.frame(tsne_coords)
+head(colnames(tsne_df))  # 看看 composite_label 在不在
+```
+```{r}
+tsne_df$pseudotime_new <- pseudotime_matrix_new[, 1]
+tsne_df$composite_label <- sce$composite_label
+
+```
+
+```{r}
+ggplot(tsne_df, aes(x = pseudotime_new, fill = composite_label)) +
+  geom_density(alpha = 0.5) +
+  theme_minimal() +
+  ggtitle("Pseudotime from OPC (naive)")
+
+```
+
+
+```{r}
+dim(reducedDim(sce, "TSNE")) 
+```
+
+```{r}
+plot(reducedDim(sce, "TSNE"), 
+     col = viridis(100)[rank(sce$pseudotime_new)], 
+     pch = 16, asp = 1, main = "Pseudotime from OPC (naive)")
+lines(SlingshotDataSet(sce), lwd = 2, col = 'black')
+
+```
+

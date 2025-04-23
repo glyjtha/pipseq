@@ -34,6 +34,11 @@ sce$cluster <- OLOPC_19_subs$seurat_clusters  # use Seurat cluster info
 ```
 
 ```{r}
+reducedDims(sce)$TSNE <- OLOPC_19_fix@reductions$tsne@cell.embeddings
+```
+
+
+```{r}
 #runs the Slingshot pseudotime
 sce <- slingshot(sce, clusterLabels = 'cluster', reducedDim = 'TSNE')
 ```
@@ -279,4 +284,7 @@ print(plots[[7]])
 print(plots[[8]])
 
 ```
+
+
+
 

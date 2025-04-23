@@ -158,3 +158,17 @@ astro_micro_de <- FindMarkers(
 astro_micro_de_sorted <- astro_micro_de[order(astro_micro_de$p_val_adj), ]
 head(astro_micro_de_sorted, 20) 
 ```
+```{r}
+write.csv(astro_micro_de, "differential_expression_astro_micro/astro_vs_microglia_DE.csv", row.names = TRUE)
+write.csv(astro_micro_de, "differential_expression_astro_micro/astro_micro_de_sorted.csv", row.names = TRUE)
+
+```
+
+```{r}
+# Read the full differential expression result
+one <- read.csv("differential_expression_astro_micro/astro_vs_microglia_DE.csv", row.names = 1)
+
+# Read the top 20 sorted genes
+two <- read.csv("differential_expression_astro_micro/astro_micro_de_sorted.csv", row.names = 1)
+```
+
