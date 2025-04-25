@@ -1,0 +1,152 @@
+---
+title: "Untitled"
+output: html_document
+date: "2025-04-23"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(Seurat)
+library(SingleCellExperiment)
+library(slingshot)
+library(destiny)
+library(ggplot2)
+
+```
+
+```{r}
+# 1) Run tSNE on your Seurat object (dims = 1:20)
+OLOPC_19_fix <- RunTSNE(OLOPC_19_fix, dims = 1:20)
+```
+
+```{r}
+sce <- as.SingleCellExperiment(OLOPC_19_fix)
+sce$cluster   <- OLOPC_19_fix$seurat_clusters
+sce$condition <- OLOPC_19_fix$condition
+```
+
+```{r}
+sce$composite_label <- ifelse(
+  sce$cluster == "OPC" & sce$condition == "naive",
+  "OPC_naive",
+  as.character(sce$cluster)
+)
+```
+
+```{r}
+sce <- slingshot(
+  sce,
+  clusterLabels = "composite_label",
+  reducedDim    = "TSNE",
+  start.clus    = "OPC_naive"
+)
+```
+
+```{r}
+pt_mat               <- slingPseudotime(sce)
+sce$pt_slingshot     <- pt_mat[,1]
+
+```
+
+```{r}
+logcounts_matrix     <- as.matrix(assay(sce, "logcounts"))
+dm                   <- DiffusionMap(t(logcounts_matrix), n_pcs = 50)
+```
+```{r}
+opc2_cells <- which(sce$cluster == "2")        # all cells in cluster “2”
+root_cells  <- head(opc2_cells, 3)             # take the first 3 as tips
+
+```
+
+```{r}
+dpt_obj       <- DPT(dm, tips = root_cells)
+sce$dpt_from_opc2 <- dpt_obj$DPT1             # store the DPT1 component
+
+```
+
+```{r}
+tsne_coords <- reducedDim(sce, "TSNE")
+tsne_df     <- data.frame(
+  tSNE_1 = tsne_coords[,1],
+  tSNE_2 = tsne_coords[,2],
+  DPT     = sce$dpt_from_opc2
+)
+```
+
+
+```{r}
+ggplot(tsne_df, aes(x = tSNE_1, y = tSNE_2, color = DPT)) +
+  geom_point(size = 1) +
+  scale_color_viridis_c(name = "DPT\nfrom OPC_naive") +
+  theme_minimal() +
+  ggtitle("Diffusion Pseudotime Rooted in OPC_naive (cluster 2)")
+```
+```{r}
+root.cells <- which(sce$cluster==2 & sce$condition=="naive")
+head(root.cells)
+```
+
+```{r}
+plot(reducedDims(sce)$TSNE, col = sce$pt_slingshot, pch = 16, asp = 1,
+     xlab = "tSNE_1", ylab = "tSNE_2",
+     main = "Slingshot Trajectory in tSNE Space")
+lines(SlingshotDataSet(sce), lwd = 2, col = 'black')
+
+```
+```{r}
+library(tidyr)
+library(dplyr)
+
+# 提取 Slingshot 曲线线条
+sds <- SlingshotDataSet(sce)
+
+# 创建 data.frame 存储所有 curve 的坐标点
+curve_df <- lapply(seq_along(sds@curves), function(i) {
+  curve <- sds@curves[[i]]
+  data.frame(
+    tSNE_1 = curve$s[curve$ord, 1],
+    tSNE_2 = curve$s[curve$ord, 2],
+    curve_id = paste0("curve", i)
+  )
+}) %>% bind_rows()
+
+# 然后用 ggplot2 绘图（加在前面的 ggplot 上）
+ggplot(tsne_df, aes(x = tSNE_1, y = tSNE_2, color = DPT)) +
+  geom_point(size = 1) +
+  geom_path(data = curve_df, aes(x = tSNE_1, y = tSNE_2, group = curve_id),
+            inherit.aes = FALSE, color = "black", size = 1) +
+  scale_color_viridis_c(name = "DPT\nfrom OPC_naive") +
+  theme_minimal() +
+  ggtitle("DPT + Slingshot Trajectory Overlayed")
+
+```
+```{r}
+#trajectory using number label of the clusters
+library(shadowtext)
+
+# 把 cluster 添加到 tsne_df
+tsne_df$cluster <- sce$cluster
+
+# 计算每个 cluster 的 tSNE 坐标平均位置（用于放 label）
+label_positions <- aggregate(cbind(tSNE_1, tSNE_2) ~ cluster, data = tsne_df, FUN = mean)
+
+# 叠加 shadowtext label 到图上
+gg <- ggplot(tsne_df, aes(x = tSNE_1, y = tSNE_2, color = DPT)) +
+  geom_point(size = 1) +
+  geom_path(data = curve_df, aes(x = tSNE_1, y = tSNE_2, group = curve_id),
+            inherit.aes = FALSE, color = "black", size = 1) +
+  shadowtext::geom_shadowtext(
+    data = label_positions,
+    aes(x = tSNE_1, y = tSNE_2, label = cluster),
+    size = 5, color = "black", bg.color = "white", fontface = "bold"
+  ) +
+  scale_color_viridis_c(name = "DPT\nfrom OPC_naive") +
+  theme_minimal() +
+  ggtitle("DPT + Slingshot Trajectory + Cluster Labels")
+
+gg
+
+```

@@ -1,5 +1,5 @@
 ---
-title: "notebook4"
+title: "notebook5"
 output: html_document
 date: "2025-04-22"
 ---
@@ -9,14 +9,14 @@ date: "2025-04-22"
 #using 15 PCs causes clusters 3 and 0 to disappear from pseudotime trajectory
 #17 PCs missing cluster 1
 #20 PCs?
-OLOPC_19_fix <- RunTSNE(OLOPC_19_fix, dims = 1:20)
+OLOPC_19_subs <- RunTSNE(OLOPC_19_subs, dims = 1:17)
 ```
 
 
 ```{r}
 # Convert Seurat object to SingleCellExperiment, assign cluster labels
-sce <- as.SingleCellExperiment(OLOPC_19_fix)
-sce$cluster <- OLOPC_19_fix$seurat_clusters  # use Seurat cluster info
+sce <- as.SingleCellExperiment(OLOPC_19_subs)
+sce$cluster <- OLOPC_19_subs$seurat_clusters  # use Seurat cluster info
 ```
 
 ```{r}
@@ -50,7 +50,7 @@ sce$dpt <- dpt$DPT1
 tmp <- data.frame(
   DC1 = eigenvectors(dm)[, 1],
   DC2 = eigenvectors(dm)[, 2],
-  Timepoint = OLOPC_19_fix@meta.data$cluster
+  Timepoint = OLOPC_19_subs@meta.data$cluster
 )
 ggplot(tmp, aes(x = DC1, y = DC2, color = Timepoint)) +
   geom_point(size = 0.8) +
