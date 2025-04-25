@@ -1,1 +1,1 @@
-/gpfs/group/jin/ellie/041425_PilotPerturbseq.R
+/gpfs/group/jin/ellie/10xPerturb/250326_Thrb_Rxrg_S1.1/Analysis/041425_PilotPerturbseq.R
