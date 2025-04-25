@@ -1,0 +1,167 @@
+---
+title: ''
+output: html_document
+date: "2025-04-25"
+---
+
+DEG analysis in every MOL subtype (1/2, 3/4, 5/6) for Thrb+ and ST+ cells
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load data}
+setwd("~/gloria/pipseq/data/")
+
+# Then load the file
+load("thrb.Robj")
+
+# List the objects loaded
+ls()
+```
+
+```{r load library}
+library(SeuratObject)
+library(Seurat)
+library(ggplot2)
+library(SingleCellExperiment)
+library(tidyr)
+```
+
+```{r}
+colnames(thrb@meta.data)
+```
+```{r}
+head(thrb@meta.data)
+```
+```{r}
+Idents(thrb) %>% head()
+```
+
+```{r}
+table(thrb$seurat_clusters)
+```
+```{r}
+guide_counts <- GetAssayData(thrb, assay = "RNA", layer = "counts.CRISPR Guide Capture")
+
+```
+
+```{r}
+crisp_counts <- thrb@assays$RNA@counts[grep("st$", rownames(thrb@assays$RNA@counts)), ]
+crisp_counts
+```
+
+```{r}
+```
+
+
+```{r}
+rownames(crisp_counts)
+```
+```{r}
+grep("rc$", rownames(thrb@assays$RNA@counts), value = TRUE)
+
+```
+
+```{r}
+# Define guide sets
+safe_target_guides <- c("ST-g1-rc", "ST-g2-rc")
+thrb_guides <- c("Thrb-g1-rc", "Thrb-g3-rc")
+
+# Get guide expression from the CRISPR layer
+thrb_expr <- crisp_counts[c("Thrb-g1-rc", "Thrb-g3-rc"), , drop = FALSE]
+st_expr   <- crisp_counts[c("ST-g1-rc", "ST-g2-rc"), , drop = FALSE]
+
+
+# Sum expression across the guide set for each cell
+safe_target_totals <- colSums(safe_target_expr)
+thrb_totals        <- colSums(thrb_expr)
+
+# Get the intersecting cell names
+common_cells <- intersect(names(safe_target_totals), names(thrb_totals))
+
+# Subset to common cells
+thrb_vals <- thrb_totals[common_cells]
+st_vals   <- safe_target_totals[common_cells]
+
+# Guide-based classification (threshold = 2; adjust if needed)
+guide_group <- ifelse(
+  thrb_vals < 2 & st_vals < 2,
+  "none",
+  ifelse(thrb_vals > st_vals, "thrb", "safe_target")
+)
+
+# Store into Seurat metadata
+thrb$guide_group <- NA
+thrb$guide_group[common_cells] <- guide_group
+```
+
+```{r}
+# Add guide_group
+thrb$guide_group <- NA
+thrb$guide_group[common_cells] <- guide_group
+
+# Add mol_subtype
+thrb$mol_subtype <- plyr::mapvalues(
+  thrb$seurat_clusters,
+  from = c("1", "2", "3", "4", "5", "6"),
+  to = c("MOL_12", "MOL_12", "MOL_34", "MOL_34", "MOL_56", "MOL_56")
+)
+```
+
+```{r}
+deg_by_subtype <- list()
+
+for (mol in c("MOL_12", "MOL_34", "MOL_56")) {
+  message("Processing ", mol)
+  
+  # Subset to just this MOL subtype & Thrb/ST labeled cells
+  mol_subset <- subset(thrb, subset = mol_subtype == mol & guide_group %in% c("thrb", "safe_target"))
+  
+  # Set identities by guide group
+  Idents(mol_subset) <- "guide_group"
+  
+  # Run DEG using normalized RNA data
+  deg <- FindMarkers(
+    object = mol_subset,
+    ident.1 = "thrb",
+    ident.2 = "safe_target",
+    group.by = "guide_group",
+    assay = "RNA",
+    slot = "data",
+    logfc.threshold = 0.25,
+    min.pct = 0.05
+  )
+  
+  # Store & export
+  deg_by_subtype[[mol]] <- deg
+  write.csv(deg, paste0("DEG_", mol, "_Thrb_vs_ST.csv"))
+}
+```
+
+```{r}
+deg_function <- function(mol){
+  # Subset to just this MOL subtype & Thrb/ST labeled cells
+  mol_subset <- subset(thrb, subset = mol_subtype == mol & guide_group %in% c("thrb", "safe_target"))
+  
+  # Set identities by guide group
+  Idents(mol_subset) <- "guide_group"
+  
+  # Run DEG using normalized RNA data
+  deg <- FindMarkers(
+    object = mol_subset,
+    ident.1 = "thrb",
+    ident.2 = "safe_target",
+    group.by = "guide_group",
+    assay = "RNA",
+    slot = "data",
+    logfc.threshold = 0.25,
+    min.pct = 0.05
+  )
+  
+  # Store & export
+  deg_by_subtype[[mol]] <- deg
+  write.csv(deg, paste0("DEG_", mol, "_Thrb_vs_ST.csv"))
+}
+```
+
