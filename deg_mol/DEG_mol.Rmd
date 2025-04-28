@@ -29,6 +29,40 @@ library(tidyr)
 ```
 
 ```{r}
+thrb.data <- Read10X(data.dir = "~/gloria/pipseq/relevant_code/filtered_feature_bc_matrix_Thr")
+
+```
+
+```{r}
+names(thrb.data)
+```
+
+```{r}
+# Gene Expression assay
+thrb <- CreateSeuratObject(
+  counts = thrb.data[["Gene Expression"]],
+  project = "thrb",
+  assay = "RNA",
+  min.cells = 0
+)
+
+# CRISPR Guide Capture assay
+thrb[["CRISPR"]] <- CreateAssayObject(
+  counts = thrb.data[["CRISPR Guide Capture"]],
+  min.cells = 0
+)
+```
+
+```{r}
+thrb[["percent.mito"]] <- PercentageFeatureSet(thrb, pattern = "^mt-")
+```
+
+```{r}
+thrb <- subset(thrb, subset = nFeature_RNA > 500 & percent.mito < 25)
+```
+
+
+```{r}
 colnames(thrb@meta.data)
 ```
 ```{r}
