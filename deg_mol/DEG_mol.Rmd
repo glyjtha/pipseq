@@ -173,7 +173,7 @@ deg_function <- function(mol){
     logfc.threshold = 0.25,
     min.pct = 0.05
   )
-  write.csv(deg, paste0("DEG_", mol, "_Thrb_vs_ST.csv"))
+  #write.csv(deg, paste0("DEG_", mol, "_Thrb_vs_ST.csv"))
   return(deg)
 }
 
@@ -184,25 +184,51 @@ for (mol in c("MOL_12", "MOL_34", "MOL_56")) {
 
 ```
 
+```{r}
+#important gene list
+gene_list <- list("Ptgds", "Cryab", "Csrip1", "Nkain2", "Gstp1", "Ckb", "Cd9", "Qdpr", "Hsp90aa1", "Plcl1", "Qk", "Prr5l", "Cnp", "Fos", "Junb","Mal", "Olig1")
+```
+
 
 ```{r Volcano Plot}
 library(ggplot2)
+library(ggrepel)
 
-# Function to plot volcano
+
 plot_volcano <- function(deg, title) {
   deg$gene <- rownames(deg)
   
-  # Define significance
   deg$significance <- ifelse(
     deg$p_val_adj < 0.05 & abs(deg$avg_log2FC) > 0.25,
     ifelse(deg$avg_log2FC > 0, "Up (Thrb)", "Up (SafeTarget)"),
     "Not significant"
   )
   
-  # Plot
+  deg$label <- ifelse(deg$gene %in% gene_list, deg$gene, NA)
+
   ggplot(deg, aes(x = avg_log2FC, y = -log10(p_val_adj))) +
     geom_point(aes(color = significance), alpha = 0.7) +
-    scale_color_manual(values = c("Up (Thrb)" = "red", "Up (SafeTarget)" = "blue", "Not significant" = "grey")) +
+    
+    # Selected genes: make bigger dots
+    geom_point(
+      data = deg[deg$gene %in% gene_list, ],
+      aes(x = avg_log2FC, y = -log10(p_val_adj)),
+      color = "darkorange", size = 0.8, shape = 21, stroke = 1.5, fill = "yellow"
+    ) +
+    
+    geom_text_repel(aes(label = label), size = 3, max.overlaps = 100) +
+    geom_hline(yintercept = -log10(0.05), linetype = "dotted", color = "black") +
+    geom_vline(xintercept = c(-0.5, 0.5), linetype = "dotted", color = "black") +
+    annotate("text", 
+             x = max(deg$avg_log2FC) * 0.8, 
+             y = max(-log10(deg$p_val_adj)) * 0.9, 
+             label = "Dashed lines:\nlog2FC = ±0.5\np-adj = 0.05", 
+             hjust = 1, vjust = 1, size = 3.5, color = "black") +
+    scale_color_manual(values = c(
+      "Up (Thrb)" = "red",
+      "Up (SafeTarget)" = "blue",
+      "Not significant" = "grey"
+    )) +
     theme_minimal() +
     labs(
       title = title,
@@ -213,10 +239,14 @@ plot_volcano <- function(deg, title) {
     theme(plot.title = element_text(hjust = 0.5))
 }
 
+
+
+# Loop to plot all MOL subtypes
 for (mol in names(deg_by_subtype)) {
   print(plot_volcano(deg_by_subtype[[mol]], title = paste0(mol, " Thrb+ vs SafeTarget+")))
 }
 ```
+
 
 
 ```{r Violin Plot}
@@ -255,16 +285,16 @@ for (mol in c("MOL_12", "MOL_34", "MOL_56")) {
 ```
 
 ```{r}
-one <- read.csv("DEG_MOL_12_Thrb_vs_ST.csv", row.names = 1)
+#one <- read.csv("DEG_MOL_12_Thrb_vs_ST.csv", row.names = 1)
 ```
 
 ```{r}
-two <- read.csv("DEG_MOL_34_Thrb_vs_ST.csv", row.names = 1)
+#two <- read.csv("DEG_MOL_34_Thrb_vs_ST.csv", row.names = 1)
 
 ```
 
 ```{r}
-three <- read.csv("DEG_MOL_56_Thrb_vs_ST.csv", row.names = 1)
+#three <- read.csv("DEG_MOL_56_Thrb_vs_ST.csv", row.names = 1)
 
 ```
 
