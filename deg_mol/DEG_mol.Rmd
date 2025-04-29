@@ -243,6 +243,8 @@ plot_volcano <- function(deg, title) {
 
 # Loop to plot all MOL subtypes
 for (mol in names(deg_by_subtype)) {
+  p <- plot_volcano(deg_by_subtype[[mol]], title = paste0(mol, " Volcano"))
+  ggsave(filename = paste0("~/gloria/pipseq/deg_mol/plots/volcano_", mol, ".png"), plot = p, width = 6, height = 4, dpi = 300)
   print(plot_volcano(deg_by_subtype[[mol]], title = paste0(mol, " Thrb+ vs SafeTarget+")))
 }
 ```
@@ -277,10 +279,9 @@ for (mol in c("MOL_12", "MOL_34", "MOL_56")) {
   p <- p + plot_annotation(title = paste0(mol, " Top 6 DE Genes"), 
                            theme = theme(plot.title = element_text(size = 18, face = "bold", hjust = 0.5)))
   
-
+  ggsave(filename = paste0("~/gloria/pipseq/deg_mol/plots/violin_", mol, ".png"), plot = p, width = 6, height = 4, dpi = 300)
   print(p)
 }
-
 
 ```
 
