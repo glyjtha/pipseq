@@ -194,40 +194,38 @@ gene_list <- list("Ptgds", "Cryab", "Csrip1", "Nkain2", "Gstp1", "Ckb", "Cd9", "
 library(ggplot2)
 library(ggrepel)
 
-
 plot_volcano <- function(deg, title) {
   deg$gene <- rownames(deg)
-  
+
+  # Significance
   deg$significance <- ifelse(
     deg$p_val_adj < 0.05 & abs(deg$avg_log2FC) > 0.25,
     ifelse(deg$avg_log2FC > 0, "Up (Thrb)", "Up (SafeTarget)"),
     "Not significant"
   )
-  
+
+  # Override if gene is in the selected list
+  deg$significance[deg$gene %in% gene_list] <- "Selected"
   deg$label <- ifelse(deg$gene %in% gene_list, deg$gene, NA)
 
   ggplot(deg, aes(x = avg_log2FC, y = -log10(p_val_adj))) +
-    geom_point(aes(color = significance), alpha = 0.7) +
-    
-    # Selected genes: make bigger dots
-    geom_point(
-      data = deg[deg$gene %in% gene_list, ],
-      aes(x = avg_log2FC, y = -log10(p_val_adj)),
-      color = "darkorange", size = 0.8, shape = 21, stroke = 1.5, fill = "yellow"
-    ) +
-    
-    geom_text_repel(aes(label = label), size = 3, max.overlaps = 100) +
+    geom_point(data = subset(deg, significance == "Not significant"), aes(color = significance), alpha = 0.2) +
+    geom_point(data = subset(deg, significance %in% c("Up (Thrb)", "Up (SafeTarget)")), aes(color = significance), alpha = 0.2) +
+    geom_point(data = subset(deg, significance == "Selected"), aes(color = significance), size = 2.5) +  # orange on top
+    xlim(-1.5,2.5)+
+    geom_text_repel(data = subset(deg, significance == "Selected"), 
+                    aes(label = label), 
+                    size = 3.5, 
+                    max.overlaps = 100,
+                    box.padding = 0.5) +
     geom_hline(yintercept = -log10(0.05), linetype = "dotted", color = "black") +
     geom_vline(xintercept = c(-0.5, 0.5), linetype = "dotted", color = "black") +
-    annotate("text", 
-             x = max(deg$avg_log2FC) * 0.8, 
-             y = max(-log10(deg$p_val_adj)) * 0.9, 
-             label = "Dashed lines:\nlog2FC = ±0.5\np-adj = 0.05", 
-             hjust = 1, vjust = 1, size = 3.5, color = "black") +
+  
     scale_color_manual(values = c(
       "Up (Thrb)" = "red",
       "Up (SafeTarget)" = "blue",
-      "Not significant" = "grey"
+      "Not significant" = "grey",
+      "Selected" = "darkorange"
     )) +
     theme_minimal() +
     labs(
@@ -236,9 +234,9 @@ plot_volcano <- function(deg, title) {
       y = "-log10 Adjusted P-value",
       color = "Group"
     ) +
-    theme(plot.title = element_text(hjust = 0.5))
+    theme(plot.title = element_text(hjust = 0.5)) +
+    coord_cartesian(clip = "off")  # ensures labels outside bounds are shown
 }
-
 
 
 # Loop to plot all MOL subtypes
@@ -248,8 +246,6 @@ for (mol in names(deg_by_subtype)) {
   print(plot_volcano(deg_by_subtype[[mol]], title = paste0(mol, " Thrb+ vs SafeTarget+")))
 }
 ```
-
-
 
 ```{r Violin Plot}
 library(ggplot2)
