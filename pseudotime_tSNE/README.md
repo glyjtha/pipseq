@@ -1,8 +1,9 @@
 ### Pseudotime Analysis on tSNE
 
-##Data
+## Data
 OLOPC_19_fix and OLOPC_19_subs Objects
 
+## Steps
 - Run tSNE with reduce dimension
 - convert Seurat Object to SingleCell Experiment to assgin cluster
 - Use Slingshot to run Pseudotime
