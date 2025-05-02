@@ -8,7 +8,7 @@ date: "2025-04-15"
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## CHECK DIFFERENTIAL EXPRESSION ASTROCYTES AND MICROGLIA
+## CHECK DIFFERENTIAL EXPRESSION 
  
 ```{r Load library}
 library(SeuratObject)
@@ -145,95 +145,29 @@ astrocytes$celltype <- "Astrocytes"
 microglia$celltype <- "Microglia"
 ```
 
+
 ```{r}
-#merges the astrocytes and microglia Seurat objects into a single object
-combined_obj <- JoinLayers(combined_obj)
+#find marker function
+find_marker <- function(seurat_obj, condition1, condition2, group.by = NULL) {
+  if (!is.null(group.by)) {
+    Idents(seurat_obj) <- seurat_obj[[group.by]][,1]  # set identity from metadata column
+  }
+
+  markers <- FindMarkers(
+    seurat_obj,
+    ident.1 = condition1,
+    ident.2 = condition2,
+    logfc.threshold = 0.25,
+    min.pct = 0.1,
+    test.use = "wilcox"
+  )
+
+  return(markers)
+}
 ```
 
 ```{r}
-Assays(combined_obj)
-```
-```{r}
-Layers(combined_obj)
-```
-
-
-```{r}
-#compares astrocytes vs. microglia to identify differentially expressed genes
-astro_micro_de <- FindMarkers(
-  combined_obj,
-  ident.1 = "Astrocytes",
-  ident.2 = "Microglia",
-  logfc.threshold = 0.25,    
-  min.pct = 0.1,              
-  test.use = "wilcox"        
-)
-```
-
-```{r}
-astro_micro_de_sorted <- astro_micro_de[order(astro_micro_de$p_val_adj), ]
-head(astro_micro_de_sorted, 20) 
-```
-```{r}
-write.csv(astro_micro_de, "one.csv", row.names = TRUE)
-write.csv(astro_micro_de, "two.csv", row.names = TRUE)
-
-```
-
-```{r}
-# Read the full differential expression result
-one <- read.csv("astro_vs_microglia_DE.csv", row.names = 1)
-
-# Read the top 20 sorted genes
-two <- read.csv("astro_micro_de_sorted.csv", row.names = 1)
-```
-
-```{r}
-# Read the full differential expression result
-three <- read.csv("one.csv", row.names = 1)
-
-# Read the top 20 sorted genes
-four <- read.csv("two.csv", row.names = 1)
-```
-
-```{r}
-df1 <- two
-df2 <- four
-
-#row names 
-genes1 <- rownames(df1)
-genes2 <- rownames(df2)
-
-# Find overlapping genes
-common_genes <- intersect(genes1, genes2)
-
-length(common_genes)      # how many overlap
-head(common_genes, 10)    # preview of overlaps
-
-```
-
-```{r}
-deg <- three
-deg$gene <- rownames(deg)
-deg$log10p <- -log10(deg$p_val_adj)
-
-# Cap extreme y-axis values
-deg$log10p_capped <- pmin(deg$log10p, 50)
-
-# Add significance group
-deg$significance <- ifelse(
-  deg$p_val_adj < 0.05 & abs(deg$avg_log2FC) > 0.25,
-  "Significant",
-  "Not significant"
-)
-
-# Label only the most significant genes: top 20 by score
-score <- deg$log10p * abs(deg$avg_log2FC)
-top_genes <- order(score, decreasing = TRUE)[1:20]
-deg$label <- NA
-deg$label[top_genes] <- deg$gene[top_genes]
-
-
+unique(cell_subsets[["Astrocytes"]]@meta.data$orig.ident)
 
 ```
 
@@ -242,50 +176,119 @@ deg$label[top_genes] <- deg$gene[top_genes]
 library(ggplot2)
 library(ggrepel)
 
-ggplot(deg, aes(x = avg_log2FC, y = log10p_capped)) +
-  geom_point(aes(color = significance), alpha = 0.4) +
-  geom_text_repel(aes(label = label), size = 3, max.overlaps = 30) +
-  scale_color_manual(values = c("Significant" = "red", "Not significant" = "grey")) +
-  geom_vline(xintercept = c(-0.25, 0.25), linetype = "dotted", color = "black") +
-  geom_hline(yintercept = -log10(0.05), linetype = "dotted", color = "black") +
-  labs(
-    title = "Astrocytes vs. Microglia DEGs",
-    x = "Log2 Fold Change",
-    y = "-log10 Adjusted P-value",
-    color = "Significance"
-  ) +
-  theme_minimal()
+plot_volcano <- function(deg, title){
+  deg$gene <- rownames(deg)
+  deg$log10p <- -log10(deg$p_val_adj)
+  deg$log10p[is.infinite(deg$log10p)] <- NA  # handle p_val_adj == 0
+  
+  # Cap log10p to prevent extreme spikes
+  deg$log10p_capped <- pmin(deg$log10p, 50)
+  
+  # Determine significance
+  deg$significance <- ifelse(
+    deg$p_val_adj < 0.05 & abs(deg$avg_log2FC) > 0.25,
+    "Significant", "Not significant"
+  )
+  
+  # Label top 20 most "important" DEGs based on |logFC| * logP
+  deg$label <- NA
+  score <- deg$log10p * abs(deg$avg_log2FC)
+  top20 <- order(score, decreasing = TRUE)[1:20]
+  deg$label[top20] <- deg$gene[top20]
+  
+  #plot
+  ggplot(deg, aes(x = avg_log2FC, y = log10p_capped)) +
+    geom_point(aes(color = significance), alpha = 0.5, size = 1.5) +
+    geom_text_repel(aes(label = label), size = 3, max.overlaps = 30, box.padding = 0.5) +
+    geom_vline(xintercept = c(-0.25, 0.25), linetype = "dotted", color = "black") +
+    geom_hline(yintercept = -log10(0.05), linetype = "dotted", color = "black") +
+    scale_color_manual(values = c("Significant" = "firebrick", "Not significant" = "grey80")) +
+    labs(
+      title = title,
+      x = "Log2 Fold Change",
+      y = "-log10 Adjusted P-value",
+      color = "Significance"
+    ) +
+    theme_minimal(base_size = 13) +
+    theme(
+      plot.title = element_text(hjust = 0.5),
+      legend.position = "right"
+  )
 
-
+}
 ```
 
-```{r}
-top_genes <- rownames(deg[order(deg$p_val_adj), ])[1:30]
-
-expr_matrix <- GetAssayData(combined_obj, layer = "data")
-
-# Subset to top DE genes
-heatmap_data <- expr_matrix[top_genes, ]
-```
 
 ```{r}
-
-# Ensure valid data
-heatmap_data <- as.matrix(heatmap_data)
-heatmap_data <- heatmap_data[complete.cases(heatmap_data), ]
-annotation_col = data.frame(CellType = combined_obj$celltype)
-
-# Plot
 library(pheatmap)
-pheatmap(heatmap_data,
-         cluster_rows = TRUE,
-         cluster_cols = FALSE,
-         scale = "row",        # normalize across rows
-         show_rownames = TRUE,
-         show_colnames = FALSE,
-         fontsize_row = 8,
-         annotation_col = annotation_col)
+
+plot_heatmap <- function(deg, seurat_obj, condition_column, condition1, condition2, top_n = 20) {
+  # Subset Seurat object to the two conditions
+  seurat_subset <- subset(seurat_obj, cells = colnames(seurat_obj)[seurat_obj[[condition_column]][,1] %in% c(condition1, condition2)])
+  
+  # Extract expression matrix (normalized data)
+  expr_matrix <- GetAssayData(seurat_subset, layer = "data")
+  
+  # Get top DEGs
+  top_genes <- head(rownames(deg[order(deg$p_val_adj), , drop = FALSE]), top_n)
+  
+  # Subset expression matrix to top genes
+  heatmap_data <- expr_matrix[top_genes, , drop = FALSE]
+  heatmap_data <- as.matrix(heatmap_data)
+  heatmap_data <- heatmap_data[complete.cases(heatmap_data), ]
+  
+  # Make column annotation
+  annotation_col <- data.frame(
+    Condition = seurat_subset@meta.data[[condition_column]]
+  )
+  rownames(annotation_col) <- colnames(seurat_subset)
+  
+  # Plot
+  pheatmap(heatmap_data,
+           cluster_rows = TRUE,
+           cluster_cols = FALSE,
+           scale = "row",
+           show_rownames = TRUE,
+           show_colnames = FALSE,
+           fontsize_row = 8,
+           annotation_col = annotation_col)
+}
+```
+
+```{r}
+comparison_list <- list(
+  c("tambex1wk", "veh1wk"),
+  c("tambexA", "vehA"),
+  c("tambexB", "vehB"),
+  c("tambexC", "vehC"),
+  c("naiveB", "cpzB"),
+  c("naiveC", "cpzC")
+)
 
 ```
 
+
+```{r}
+
+for (cell_type in cell_type_list) {
+  for (comp in comparison_list) {
+    condition1 <- comp[1]
+    condition2 <- comp[2]
+    message(sprintf("Processing: %s | %s vs %s", cell_type, condition1, condition2))
+
+    # Differential expression
+    deg <- find_marker(
+      seurat_obj = cell_subsets[[cell_type]],
+      condition1 = condition1,
+      condition2 = condition2,
+      group.by = "orig.ident"
+    )
+
+    # Volcano plot
+    p <- plot_volcano(deg, title = paste(cell_type, ":", condition1, "vs", condition2))
+    print(p)
+
+  }
+}
+```
 
