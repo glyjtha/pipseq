@@ -256,15 +256,26 @@ plot_heatmap <- function(deg, seurat_obj, condition_column, condition1, conditio
 ```
 
 ```{r}
+add_group_combined <- function(obj) {
+  obj$group_combined <- ifelse(obj$orig.ident %in% c("tambexA", "tambexB", "tambexC"), "tambex",
+                         ifelse(obj$orig.ident %in% c("vehA", "vehB", "vehC"), "veh",
+                         ifelse(obj$orig.ident %in% c("naiveB", "naiveC"), "naive",
+                         ifelse(obj$orig.ident %in% c("cpzB", "cpzC"), "cpz", obj$orig.ident))))
+  return(obj)
+}
+
+for (name in names(cell_subsets)) {
+  cell_subsets[[name]] <- add_group_combined(cell_subsets[[name]])
+}
+
+```
+
+```{r}
 comparison_list <- list(
   c("tambex1wk", "veh1wk"),
-  c("tambexA", "vehA"),
-  c("tambexB", "vehB"),
-  c("tambexC", "vehC"),
-  c("naiveB", "cpzB"),
-  c("naiveC", "cpzC")
+  c("tambex", "veh"),
+  c("naive", "cpz")
 )
-
 ```
 
 
@@ -281,7 +292,7 @@ for (cell_type in cell_type_list) {
       seurat_obj = cell_subsets[[cell_type]],
       condition1 = condition1,
       condition2 = condition2,
-      group.by = "orig.ident"
+      group.by = "group_combined"
     )
 
     # Volcano plot
