@@ -91,7 +91,7 @@ table(Idents(obj))
 group_cluster <- function(cell_types){
   subset(obj, idents = cell_types)
 }
-cell_type_list <- c("Astrocytes", "Microglia", "L5IT", "L6IT", "L5ET", "L6CT" )
+cell_type_list <- c("Astrocytes", "Microglia", "L5IT", "L6IT", "L5ET", "L6CT", "L2/3IT" )
 
 #store all subtypes
 cell_subsets <- list()
@@ -137,12 +137,6 @@ for (name in names(cell_subsets)) {
   cell_subsets[[name]] <- normalize_data(cell_subsets[[name]])
 }
 
-```
-
-```{r}
-#cell type label for each subset
-astrocytes$celltype <- "Astrocytes"
-microglia$celltype <- "Microglia"
 ```
 
 
