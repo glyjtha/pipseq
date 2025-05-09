@@ -101,7 +101,7 @@ pearson_mat <- cor(t(dc_mat))^10
 k       <- 10
 SCC_cut <- 0.1
 
-# 1) Build a list of edge-data.frames, returning NULL if no edges meet the threshold
+# Build a list of edge-data.frames, returning NULL if no edges meet the threshold
 edges_list <- lapply(seq_len(ncol(dist_mat)), function(i) {
   # find k nearest neighbors by distance
   nn    <- order(dist_mat[, i])[2:(k+1)]
@@ -143,7 +143,7 @@ edges_list <- lapply(seq_len(ncol(dist_mat)), function(j) {
 # rbind them
 edges <- do.call(rbind, edges_list)
 
-# 4) Build the graph
+# Build the graph
 g <- igraph::graph_from_data_frame(edges, directed = FALSE)
 
 ```
@@ -218,7 +218,7 @@ print(grid)
 ```
 
 ```{r}
-# 1. Compute t-SNE on your PCA reduction
+# Compute t-SNE on PCA reduction
 OLOPC_19_subs <- RunTSNE(
   OLOPC_19_subs,
   reduction = "pca",
@@ -233,7 +233,7 @@ plot_df$cell       <- rownames(plot_df)
 plot_df$pseudotime <- pseudotime
 plot_df$lineage    <- factor(lineage[plot_df$cell])
 
-# 10) Plot
+# Plot
 library(ggplot2); library(viridis); library(shadowtext)
 p <- ggplot(plot_df, aes(tSNE_1, tSNE_2, colour = pseudotime)) +
      geom_point(size = 1) +
