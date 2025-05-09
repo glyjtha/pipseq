@@ -1,0 +1,307 @@
+```{r SCN3E-setup, message=FALSE}
+library(destiny)      # for Transitions(), DPT
+library(e1071)        # for svm()
+library(amap)         # for Dist()
+library(igraph)       # for graph + community detection
+library(Seurat)       # to extract counts
+library(ggplot2)
+library(viridis)
+library(shadowtext)
+```
+
+```{r}
+names(OLOPC_19_subs@assays)
+```
+
+```{r}
+#explicitly naming the assay:
+counts_mat <- as.matrix(
+  GetAssayData(
+    object = OLOPC_19_subs,
+    assay  = "RNA", 
+    layer   = "counts"
+  )
+)
+DefaultAssay(OLOPC_19_subs) <- "RNA"
+counts_mat <- as.matrix( GetAssayData(OLOPC_19_subs, slot = "counts") )
+```
+
+
+```{r feature selection}
+#keep genes expressed ≥1 in at least one cell
+expressed <- rowSums(counts_mat >= 1) > 0
+emat <- counts_mat[expressed,]
+
+# Compute log-mean & CV^2
+CVsq <- function(x) (sd(x)/mean(x))^2
+meancounts <- rowMeans(emat)
+CV2         <- apply(emat, 1, CVsq)
+df <- data.frame(
+  LogExpr = log(meancounts),
+  CV2     = log(CV2)
+)
+
+# Fit SVR line & pick high‐variance genes
+svr_mod    <- svm(CV2 ~ LogExpr, data = df, gamma = 0.06)
+predicted  <- predict(svr_mod, df)
+df$relVar  <- df$CV2 - predicted
+# threshold of 0.5 above trend
+highVar    <- which(df$relVar >= 0.5)
+NormGenes  <- rownames(df)[highVar]
+length(NormGenes)  # how many HVGs
+```
+
+```{r}
+# 1) build the diffusion map as before
+expr_log <- t(log1p(emat[NormGenes,]))
+dm       <- DiffusionMap(expr_log)
+
+# 2) run DPT to get pseudotime (and branching, if desired)
+#    this requires >= destiny 3.1.1
+pt       <- DPT(dm)
+
+# 3) extract the pseudotime vector
+# raw DPT distance
+
+```
+
+```{r}
+# raw DPT distances
+pseudotime <- pt@dm@d
+```
+
+
+```{r}
+# transition matrix
+trans_mat <- as(dm@transitions, "matrix")   # you can coerce to dense if small enough
+
+# Get the diffusion components (eigenvectors):
+#    Column 1 is trivial (constant), so drop it.
+dc_mat <- dm@eigenvectors[, -1, drop = FALSE]  
+colnames(dc_mat) <- paste0("DC", seq_len(ncol(dc_mat)))
+```
+
+
+```{r}
+# 6) Distance in diffusion‐component space
+# explicitly call amap::Dist and then coerce to a matrix
+dist_mat <- as.matrix(
+  amap::Dist(dc_mat, method = "euclidean", nbproc = 8)
+)
+
+```
+
+```{r}
+dim(dist_mat)        # should be (#cells × #cells)
+length(dist_mat[, 1])  # valid numeric vector of length #cells
+```
+
+```{r}
+pearson_mat <- cor(t(dc_mat))^10
+k       <- 10
+SCC_cut <- 0.1
+
+# 1) Build a list of edge-data.frames, returning NULL if no edges meet the threshold
+edges_list <- lapply(seq_len(ncol(dist_mat)), function(i) {
+  # find k nearest neighbors by distance
+  nn    <- order(dist_mat[, i])[2:(k+1)]
+  # their Pearson weights
+  corrs <- pearson_mat[nn, i]
+  # which ones are “strong”
+  keep  <- which(corrs > SCC_cut)
+  if (length(keep) == 0) {
+    return(NULL)       # no edges here
+  }
+  data.frame(
+    Source = colnames(dist_mat)[i],
+    Target = colnames(dist_mat)[i][nn[keep]],
+    Weight = corrs[keep],
+    stringsAsFactors = FALSE
+  )
+})
+
+# Drop  NULLs
+edges_list <- lapply(seq_len(ncol(dist_mat)), function(j) {
+  # pick k nearest by distance
+  nn    <- order(dist_mat[, j])[2:(k+1)]
+  
+  # compute correlations only among those k
+  corrs <- pearson_mat[nn, j]
+  
+  # threshold
+  keep  <- which(corrs > SCC_cut)
+  if (!length(keep)) return(NULL)
+  
+  data.frame(
+    from   = colnames(dist_mat)[j],
+    to     = colnames(dist_mat)[j][nn[keep]],
+    weight = corrs[keep],
+    stringsAsFactors = FALSE
+  )
+})
+
+# rbind them
+edges <- do.call(rbind, edges_list)
+
+# 4) Build the graph
+g <- igraph::graph_from_data_frame(edges, directed = FALSE)
+
+```
+
+```{r}
+Reductions(OLOPC_19_subs)
+
+```
+
+```{r}
+
+# lineages
+wc      <- cluster_walktrap(g, weights = E(g)$Weight)
+lineage <- membership(wc)
+```
+
+
+```{r}
+# how many communities?
+table(lineage)
+
+```
+
+
+```{r}
+deg <- igraph::degree(g)
+summary(deg)
+hist(deg, breaks=50, main="Degree distribution", xlab="Degree")
+
+```
+
+
+```{r}
+# ---- grid search for community counts ----
+powers <- c(5, 10, 20)
+cuts   <- c(0.05, 0.1, 0.2)
+ks     <- c(10, 15, 20)
+
+grid <- expand.grid(power = powers, cut = cuts, k = ks, stringsAsFactors = FALSE)
+grid$comms <- NA_integer_
+
+for (i in seq_len(nrow(grid))) {
+  pw <- grid$power[i]
+  cc <- grid$cut[i]
+  kk <- grid$k[i]
+  
+  # recompute pearson weights
+  pearson_mat <- cor(t(dc_mat))^pw
+  
+  # rebuild edges with threshold cc and k neighbors
+  elst <- lapply(seq_len(ncol(dist_mat)), function(j) {
+    nn    <- order(dist_mat[, j])[2:(kk+1)]
+    corrs <- pearson_mat[nn, j]
+    keep  <- which(corrs > cc)
+    if (!length(keep)) return(NULL)
+    data.frame(
+      from   = colnames(dist_mat)[j],
+      to     = colnames(dist_mat)[j][nn[keep]],
+      weight = corrs[keep],
+      stringsAsFactors = FALSE
+    )
+  })
+  elst    <- Filter(Negate(is.null), elst)
+  edges   <- do.call(rbind, elst)
+  gtmp    <- igraph::graph_from_data_frame(edges, directed = FALSE)
+  wctmp   <- igraph::cluster_walktrap(gtmp, weights = E(gtmp)$weight)
+  grid$comms[i] <- length(unique(membership(wctmp)))
+}
+
+print(grid)
+
+```
+
+```{r}
+# 1. Compute t-SNE on your PCA reduction
+OLOPC_19_subs <- RunTSNE(
+  OLOPC_19_subs,
+  reduction = "pca",
+  dims      = 1:17,
+  assay     = "RNA",
+  name      = "tsne"      # this will create a "tsne" reduction
+)
+tsne_emb    <- Embeddings(OLOPC_19_subs, "tsne")
+
+plot_df     <- as.data.frame(tsne_emb)
+plot_df$cell       <- rownames(plot_df)
+plot_df$pseudotime <- pseudotime
+plot_df$lineage    <- factor(lineage[plot_df$cell])
+
+# 10) Plot
+library(ggplot2); library(viridis); library(shadowtext)
+p <- ggplot(plot_df, aes(tSNE_1, tSNE_2, colour = pseudotime)) +
+     geom_point(size = 1) +
+     scale_color_viridis_c() +
+     theme_minimal() +
+     ggtitle("SCN3E Pseudotime on tSNE")
+
+centroids <- aggregate(cbind(tSNE_1, tSNE_2) ~ lineage, data = plot_df, FUN = mean)
+p + shadowtext::geom_shadowtext(
+      data    = centroids,
+      aes(x = tSNE_1, y = tSNE_2, label = lineage),
+      color   = "black",
+      bg.color= "white",
+      size    = 5
+    )
+```
+
+```{r}
+head(plot_df)
+```
+
+```{r}
+cell_ids <- V(g)$name
+plot_df  <- data.frame(
+  X      = layout_fr[,1],
+  Y      = layout_fr[,2],
+  branch = factor(lineage[cell_ids]),
+  cell   = cell_ids
+)
+
+```
+
+
+```{r}
+# use the Pearson weights as “attraction” strengths 
+layout_fr <- layout_with_fr(
+  g,
+  weights    = E(g)$Weight,
+  niter      = 100000,
+  start.temp = sqrt(vcount(g))
+)
+```
+
+```{r}
+library(ggplot2)
+library(ggforce)        # for edges in ggplot
+library(viridis)        # for color palette
+
+# create an edge‐list with coordinates
+el <- as_data_frame(g, what = "edges")
+el$x1 <- layout_fr[ match(el$from, cell_ids), 1 ]
+el$y1 <- layout_fr[ match(el$from, cell_ids), 2 ]
+el$x2 <- layout_fr[ match(el$to,   cell_ids), 1 ]
+el$y2 <- layout_fr[ match(el$to,   cell_ids), 2 ]
+
+ggplot() +
+  # edges
+  geom_segment(data = el,
+               aes(x=x1, y=y1, xend=x2, yend=y2),
+               color = "grey80", size = 0.2, alpha = 0.5) +
+  # nodes
+  geom_point(data = plot_df,
+             aes(x=X, y=Y, color = branch),
+             size = 1.5) +
+  scale_color_viridis_d(option = "D") +
+  theme_void() +
+  ggtitle("SCN3E network embedding") 
+
+```
+
+
