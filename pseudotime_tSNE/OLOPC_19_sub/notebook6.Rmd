@@ -52,12 +52,11 @@ length(NormGenes)  # how many HVGs
 ```
 
 ```{r build DPT}
-# 1) build the diffusion map as before
+# build the diffusion map 
 expr_log <- t(log1p(emat[NormGenes,]))
 dm       <- DiffusionMap(expr_log)
 
-# 2) run DPT to get pseudotime (and branching, if desired)
-#    this requires >= destiny 3.1.1
+# run DPT to get pseudotime
 pt       <- DPT(dm)
 ```
 
@@ -101,7 +100,7 @@ branches3 <- apply(
     idx
   }
 )
-# 5) Check you really got three non‐NA groups of the expected sizes
+Check really got three non‐NA groups of the expected sizes
 table(branches3, useNA = "ifany")
 
 ```
