@@ -51,7 +51,7 @@ NormGenes  <- rownames(df)[highVar]
 length(NormGenes)  # how many HVGs
 ```
 
-```{r}
+```{r build DPT}
 # 1) build the diffusion map as before
 expr_log <- t(log1p(emat[NormGenes,]))
 dm       <- DiffusionMap(expr_log)
@@ -59,249 +59,195 @@ dm       <- DiffusionMap(expr_log)
 # 2) run DPT to get pseudotime (and branching, if desired)
 #    this requires >= destiny 3.1.1
 pt       <- DPT(dm)
-
-# 3) extract the pseudotime vector
-# raw DPT distance
-
 ```
 
+##code block before are correct
+
 ```{r}
-# raw DPT distances
-pseudotime <- pt@dm@d
+#branches or lineages within the cell population based on the tips and the underlying diffusion map. Each branch represents a distinct developmental pathway or trajectory. 
+head(pt@branch)
 ```
 
 
 ```{r}
-# transition matrix
-trans_mat <- as(dm@transitions, "matrix")   # you can coerce to dense if small enough
+#starting points or nodes that are used to calculate the DPT values
+head(pt@tips)
+```
+```{r}
+pt@dm
+```
 
-# Get the diffusion components (eigenvectors):
-#    Column 1 is trivial (constant), so drop it.
-dc_mat <- dm@eigenvectors[, -1, drop = FALSE]  
+```{r}
+# Count branch matrix
+tip_sizes_branch <- colSums(!is.na(pt@branch))
+sort(tip_sizes_branch, decreasing = TRUE)
+
+```
+```{r}
+#use top 3 branches
+big3             <- order(tip_sizes_branch, decreasing=TRUE)[1:3]
+big3
+```
+
+
+```{r}
+
+branches3 <- apply(
+  pt@branch[, big3, drop=FALSE], 
+  1, 
+  function(x) {
+    idx <- which(!is.na(x))[2]    # 1, 2, or 3
+    if (is.na(idx)) return(NA_integer_)
+    idx
+  }
+)
+# 5) Check you really got three non‐NA groups of the expected sizes
+table(branches3, useNA = "ifany")
+
+```
+
+```{r}
+branches3
+```
+
+
+
+```{r}
+# after extract the eigenvectors from destiny
+dc_mat <- dm@eigenvectors[, -1, drop = FALSE]
+# make sure the rownames are the cell‐barcodes
+rownames(dc_mat) <- rownames(dm@eigenvectors)  
+
+# keep the DC labels on the column names
 colnames(dc_mat) <- paste0("DC", seq_len(ncol(dc_mat)))
-```
 
-
-```{r}
-# 6) Distance in diffusion‐component space
-# explicitly call amap::Dist and then coerce to a matrix
+# compute the cell–cell distance matrix
 dist_mat <- as.matrix(
   amap::Dist(dc_mat, method = "euclidean", nbproc = 8)
 )
 
-```
+# build Pearson weight matrix
+pearson_mat <- cor(t(dc_mat))^5 
 
-```{r}
-dim(dist_mat)        # should be (#cells × #cells)
-length(dist_mat[, 1])  # valid numeric vector of length #cells
-```
-
-```{r}
-pearson_mat <- cor(t(dc_mat))^10
-k       <- 10
-SCC_cut <- 0.1
-
-# Build a list of edge-data.frames, returning NULL if no edges meet the threshold
-edges_list <- lapply(seq_len(ncol(dist_mat)), function(i) {
-  # find k nearest neighbors by distance
-  nn    <- order(dist_mat[, i])[2:(k+1)]
-  # their Pearson weights
-  corrs <- pearson_mat[nn, i]
-  # which ones are “strong”
-  keep  <- which(corrs > SCC_cut)
-  if (length(keep) == 0) {
-    return(NULL)       # no edges here
-  }
+# build kNN+thresholded edges among:
+k      <- 15
+cutoff <- 0.5
+edges_list <- lapply(seq_len(nrow(dist_mat)), function(i) {
+  # i indexes **rows** = cells
+  this_cell <- rownames(dist_mat)[i]
+  # find k nearest neighbours by distance
+  nn   <- order(dist_mat[i, ])[2:(k+1)]
+  # their correlations
+  corrs <- pearson_mat[i, nn]
+  keep <- which(corrs > cutoff)
+  if (length(keep)==0) return(NULL)
   data.frame(
-    Source = colnames(dist_mat)[i],
-    Target = colnames(dist_mat)[i][nn[keep]],
-    Weight = corrs[keep],
-    stringsAsFactors = FALSE
-  )
-})
-
-# Drop  NULLs
-edges_list <- lapply(seq_len(ncol(dist_mat)), function(j) {
-  # pick k nearest by distance
-  nn    <- order(dist_mat[, j])[2:(k+1)]
-  
-  # compute correlations only among those k
-  corrs <- pearson_mat[nn, j]
-  
-  # threshold
-  keep  <- which(corrs > SCC_cut)
-  if (!length(keep)) return(NULL)
-  
-  data.frame(
-    from   = colnames(dist_mat)[j],
-    to     = colnames(dist_mat)[j][nn[keep]],
+    from   = this_cell,
+    to     = rownames(dist_mat)[nn[keep]],
     weight = corrs[keep],
-    stringsAsFactors = FALSE
+    stringsAsFactors=FALSE
   )
 })
-
-# rbind them
-edges <- do.call(rbind, edges_list)
-
-# Build the graph
-g <- igraph::graph_from_data_frame(edges, directed = FALSE)
-
-```
-
-```{r}
-Reductions(OLOPC_19_subs)
-
-```
-
-```{r}
-
-# lineages
-wc      <- cluster_walktrap(g, weights = E(g)$Weight)
-lineage <- membership(wc)
-```
-
-
-```{r}
-# how many communities?
-table(lineage)
+edges <- do.call(rbind, Filter(Negate(is.null), edges_list))
 
 ```
 
 
 ```{r}
-deg <- igraph::degree(g)
-summary(deg)
-hist(deg, breaks=50, main="Degree distribution", xlab="Degree")
+library(igraph)
 
-```
+# 0) Start over from edges data.frame, to be sure g is entirely fresh:
+g <- graph_from_data_frame(edges, directed = FALSE)
 
-
-```{r}
-# ---- grid search for community counts ----
-powers <- c(5, 10, 20)
-cuts   <- c(0.05, 0.1, 0.2)
-ks     <- c(10, 15, 20)
-
-grid <- expand.grid(power = powers, cut = cuts, k = ks, stringsAsFactors = FALSE)
-grid$comms <- NA_integer_
-
-for (i in seq_len(nrow(grid))) {
-  pw <- grid$power[i]
-  cc <- grid$cut[i]
-  kk <- grid$k[i]
-  
-  # recompute pearson weights
-  pearson_mat <- cor(t(dc_mat))^pw
-  
-  # rebuild edges with threshold cc and k neighbors
-  elst <- lapply(seq_len(ncol(dist_mat)), function(j) {
-    nn    <- order(dist_mat[, j])[2:(kk+1)]
-    corrs <- pearson_mat[nn, j]
-    keep  <- which(corrs > cc)
-    if (!length(keep)) return(NULL)
-    data.frame(
-      from   = colnames(dist_mat)[j],
-      to     = colnames(dist_mat)[j][nn[keep]],
-      weight = corrs[keep],
-      stringsAsFactors = FALSE
-    )
-  })
-  elst    <- Filter(Negate(is.null), elst)
-  edges   <- do.call(rbind, elst)
-  gtmp    <- igraph::graph_from_data_frame(edges, directed = FALSE)
-  wctmp   <- igraph::cluster_walktrap(gtmp, weights = E(gtmp)$weight)
-  grid$comms[i] <- length(unique(membership(wctmp)))
+# 1) drop any edges weight is NA or non-numeric
+bad_edges <- which(!is.finite(E(g)$weight))
+if (length(bad_edges)) {
+  message("Removing ", length(bad_edges), " NA/non-finite edges")
+  g <- delete_edges(g, E(g)[bad_edges])
 }
 
-print(grid)
-
-```
-
-```{r}
-# Compute t-SNE on PCA reduction
-OLOPC_19_subs <- RunTSNE(
-  OLOPC_19_subs,
-  reduction = "pca",
-  dims      = 1:17,
-  assay     = "RNA",
-  name      = "tsne"      # this will create a "tsne" reduction
-)
-tsne_emb    <- Embeddings(OLOPC_19_subs, "tsne")
-
-plot_df     <- as.data.frame(tsne_emb)
-plot_df$cell       <- rownames(plot_df)
-plot_df$pseudotime <- pseudotime
-plot_df$lineage    <- factor(lineage[plot_df$cell])
-
-# Plot
-library(ggplot2); library(viridis); library(shadowtext)
-p <- ggplot(plot_df, aes(tSNE_1, tSNE_2, colour = pseudotime)) +
-     geom_point(size = 1) +
-     scale_color_viridis_c() +
-     theme_minimal() +
-     ggtitle("SCN3E Pseudotime on tSNE")
-
-centroids <- aggregate(cbind(tSNE_1, tSNE_2) ~ lineage, data = plot_df, FUN = mean)
-p + shadowtext::geom_shadowtext(
-      data    = centroids,
-      aes(x = tSNE_1, y = tSNE_2, label = lineage),
-      color   = "black",
-      bg.color= "white",
-      size    = 5
-    )
-```
-
-```{r}
-head(plot_df)
-```
-
-```{r}
-cell_ids <- V(g)$name
-plot_df  <- data.frame(
-  X      = layout_fr[,1],
-  Y      = layout_fr[,2],
-  branch = factor(lineage[cell_ids]),
-  cell   = cell_ids
-)
-
-```
-
-
-```{r}
-# use the Pearson weights as “attraction” strengths 
-layout_fr <- layout_with_fr(
+# 2) drop loops, merge parallel edges keeping the max weight
+g <- simplify(
   g,
-  weights    = E(g)$Weight,
-  niter      = 100000,
-  start.temp = sqrt(vcount(g))
+  remove.multiple = TRUE,
+  remove.loops    = TRUE,
+  edge.attr.comb  = list(weight = "max")
 )
+
+# 3) Delete vertices with degree 0
+isolates <- V(g)[degree(g) == 0]
+if (length(isolates)) {
+  message("Dropping ", length(isolates), " isolated vertices")
+  g <- delete_vertices(g, isolates)
+}
+
+# 4) Verify the integrity
+cat("After cleanup:\n")
+cat(" vertices:", vcount(g), "\n")
+cat(" edges:   ", ecount(g), "\n")
+stopifnot(!any(is.na(E(g)$weight)))
+stopifnot(all(is.finite(E(g)$weight)))
+stopifnot(is.numeric(E(g)$weight))
+
+layout_auto <- layout_nicely(g)   # picks a reasonable default under the hood
+plot(g, layout = layout_auto, vertex.size=1, vertex.label=NA, edge.color="grey80")
+
+
 ```
 
 ```{r}
 library(ggplot2)
-library(ggforce)        # for edges in ggplot
-library(viridis)        # for color palette
+library(ggforce)
+library(viridis)
 
-# create an edge‐list with coordinates
-el <- as_data_frame(g, what = "edges")
-el$x1 <- layout_fr[ match(el$from, cell_ids), 1 ]
-el$y1 <- layout_fr[ match(el$from, cell_ids), 2 ]
-el$x2 <- layout_fr[ match(el$to,   cell_ids), 1 ]
-el$y2 <- layout_fr[ match(el$to,   cell_ids), 2 ]
+# 1) Extract DC2/DC3 coordinates from  DiffusionMap:
+dc_coords <- as.data.frame(dm@eigenvectors[, 2:3])
+colnames(dc_coords) <- c("X", "Y")
+dc_coords$cell <- rownames(dc_coords)
 
+# 2) Build a node‐metadata frame
+node_df <- dc_coords
+node_df$branch <- factor(pt@branch[,1][node_df$cell],
+                         levels=c(1,2,3),
+                         labels=c("Arm1","Arm2","Arm3"))
+
+# 3) Turn to igraph object into an edge‐list with coordinates:
+el <- as_data_frame(g, what="edges")
+el$x1 <- dc_coords$X[ match(el$from, dc_coords$cell) ]
+el$y1 <- dc_coords$Y[ match(el$from, dc_coords$cell) ]
+el$x2 <- dc_coords$X[ match(el$to,   dc_coords$cell) ]
+el$y2 <- dc_coords$Y[ match(el$to,   dc_coords$cell) ]
+
+# 4) Plot with ggplot2 + ggforce:
 ggplot() +
-  # edges
-  geom_segment(data = el,
-               aes(x=x1, y=y1, xend=x2, yend=y2),
-               color = "grey80", size = 0.2, alpha = 0.5) +
-  # nodes
-  geom_point(data = plot_df,
-             aes(x=X, y=Y, color = branch),
-             size = 1.5) +
-  scale_color_viridis_d(option = "D") +
+  geom_segment(data=el,
+               aes(x=x1,y=y1,xend=x2,yend=y2),
+               color="grey80", size=0.2, alpha=0.4) +
+  geom_point(data=node_df,
+             aes(x=X,y=Y,color=branch),
+             size=1.2) +
+  scale_color_viridis_d(option="D", name="Branch") +
   theme_void() +
-  ggtitle("SCN3E network embedding") 
+  ggtitle("SCN3E Network Embedding\n(DC2 vs DC3)")
 
 ```
+
+# Branch 1
+   OPC  COP  NFOL  MOL_DA   MOL 
+  1764 1499  842   822   372  
+
+# Branch 2
+   OPC  COP  NFOL  MOL_DA   MOL 
+  1758 1336    6   807   155  
+
+# Branch 3
+   OPC  COP  NFOL  MOL_DA   MOL 
+  1754 1156    5   796   141  
+  
+Arm 1 (branches3==1) → the OPC → COP → NFOL lineage
+
+Arm 2 (branches3==2) → one MOL trajectory
+
+Arm 3 (branches3==3) → another MOL trajectory
 
 
