@@ -166,6 +166,7 @@ unique(cell_subsets[["Astrocytes"]]@meta.data$orig.ident)
 ```
 
 
+
 ```{r}
 library(ggplot2)
 library(ggrepel)
@@ -187,13 +188,13 @@ plot_volcano <- function(deg, title){
   # Label top 20 most "important" DEGs based on |logFC| * logP
   deg$label <- NA
   score <- deg$log10p * abs(deg$avg_log2FC)
-  top20 <- order(score, decreasing = TRUE)[1:20]
-  deg$label[top20] <- deg$gene[top20]
+  top30 <- order(score, decreasing = TRUE)[1:30]
+  deg$label[top30] <- deg$gene[top30]
   
   #plot
   ggplot(deg, aes(x = avg_log2FC, y = log10p_capped)) +
     geom_point(aes(color = significance), alpha = 0.5, size = 1.5) +
-    geom_text_repel(aes(label = label), size = 3, max.overlaps = 30, box.padding = 0.5) +
+    geom_text_repel(aes(label = label), size = 2.5, max.overlaps = 30, box.padding = 0.5) +
     geom_vline(xintercept = c(-0.25, 0.25), linetype = "dotted", color = "black") +
     geom_hline(yintercept = -log10(0.05), linetype = "dotted", color = "black") +
     scale_color_manual(values = c("Significant" = "firebrick", "Not significant" = "grey80")) +
@@ -274,6 +275,11 @@ comparison_list <- list(
 
 
 ```{r}
+#save in xlsx to save all pages of each csv
+library(openxlsx)
+
+# Create a new workbook
+wb <- createWorkbook()
 
 for (cell_type in cell_type_list) {
   for (comp in comparison_list) {
@@ -289,11 +295,159 @@ for (cell_type in cell_type_list) {
       group.by = "group_combined"
     )
 
-    # Volcano plot
+    # Add DEG result as a new sheet
+    sheet_name <- paste0(cell_type, "_", condition1, "_vs_", condition2)
+    sheet_name <- substr(sheet_name, 1, 31)  # Excel sheet names must be ≤31 chars
+    addWorksheet(wb, sheet_name)
+    writeData(wb, sheet = sheet_name, deg, rowNames = TRUE)
+
+    # Optional: plot
     p <- plot_volcano(deg, title = paste(cell_type, ":", condition1, "vs", condition2))
     print(p)
-
   }
 }
+
+# Save workbook
+saveWorkbook(wb, file = "All_DEGs.xlsx", overwrite = TRUE)
+
+```
+
+```{r}
+library(VennDiagram)
+library(grid)
+
+venn_diagram <- function(subtype) {
+  # 差异表达分析
+  deg_tambex_vs_veh <- find_marker(cell_subsets[[subtype]], "tambex", "veh", group.by = "group_combined")
+  deg_naive_vs_cpz  <- find_marker(cell_subsets[[subtype]], "naive",  "cpz",  group.by = "group_combined")
+
+  # 提取显著基因
+  sig_genes_tambex <- rownames(deg_tambex_vs_veh[deg_tambex_vs_veh$p_val_adj < 0.05 & abs(deg_tambex_vs_veh$avg_log2FC) > 0.25, ])
+  sig_genes_naive  <- rownames(deg_naive_vs_cpz [deg_naive_vs_cpz $p_val_adj < 0.05 & abs(deg_naive_vs_cpz $avg_log2FC) > 0.25, ])
+
+  # 找出重叠的基因
+  common_genes <- intersect(sig_genes_tambex, sig_genes_naive)
+  print(paste("Overlapping DEGs for", subtype, ":", paste(common_genes, collapse = ", ")))
+
+  # 绘制 Venn 图
+  venn.plot <- venn.diagram(
+    x = list("Tambex vs Veh" = sig_genes_tambex,
+             "Naive vs Cpz"  = sig_genes_naive),
+    filename = NULL,
+    fill = c("lightblue", "pink"),
+    alpha = 0.5,
+    cex = 1.5,
+    cat.cex = 1.2,
+    cat.pos = c(-20, 20),
+    cat.dist = c(0.05, 0.05),
+    main = paste("Overlap of DEGs -", subtype)
+  )
+
+  # 画图并添加标签
+  grid.newpage()
+  grid.draw(venn.plot)
+
+  # 加入重叠基因标签
+  if (length(common_genes) > 0) {
+    overlap_label <- paste(common_genes, collapse = ", ")
+    grid.text(
+      overlap_label,
+      x = 0.5,
+      y = 0.8,  # 可根据实际位置微调
+      gp = gpar(fontsize = 10, col = "black")
+    )
+  }
+}
+
+```
+
+```{r}
+for (cell_type in cell_type_list) {
+  venn_diagram(cell_type)
+}
+```
+
+```{r}
+
+for (cell_type in cell_type_list) {
+  message("Processing cell type: ", cell_type)
+
+  # 1. Tambex vs Veh
+  deg1 <- find_marker(cell_subsets[[cell_type]], "tambex", "veh", group.by = "group_combined")
+  plot_heatmap(deg1, cell_subsets[[cell_type]], condition_column = "group_combined",
+               condition1 = "tambex", condition2 = "veh")
+
+  # 2. Naive vs Cpz
+  deg2 <- find_marker(cell_subsets[[cell_type]], "naive", "cpz", group.by = "group_combined")
+  plot_heatmap(deg2, cell_subsets[[cell_type]], condition_column = "group_combined",
+               condition1 = "naive", condition2 = "cpz")
+}
+```
+```{r}
+library(pheatmap)
+
+plot_heatmap <- function(deg, seurat_obj, condition_column, condition1, condition2, top_n = 20, title = NULL) {
+  # Subset Seurat object to the two conditions
+  seurat_subset <- subset(seurat_obj, cells = colnames(seurat_obj)[seurat_obj[[condition_column]][,1] %in% c(condition1, condition2)])
+  
+  # Extract expression matrix (normalized data)
+  expr_matrix <- GetAssayData(seurat_subset, layer = "data")
+  
+  # Get top DEGs
+  top_genes <- head(rownames(deg[order(deg$p_val_adj), , drop = FALSE]), top_n)
+  
+  # Subset expression matrix to top genes
+  heatmap_data <- expr_matrix[top_genes, , drop = FALSE]
+  heatmap_data <- as.matrix(heatmap_data)
+  heatmap_data <- heatmap_data[complete.cases(heatmap_data), ]
+  
+  # Make column annotation
+  annotation_col <- data.frame(
+    Condition = seurat_subset@meta.data[[condition_column]]
+  )
+  rownames(annotation_col) <- colnames(seurat_subset)
+  
+  # Plot
+  pheatmap(heatmap_data,
+           cluster_rows = TRUE,
+           cluster_cols = FALSE,
+           scale = "row",
+           show_rownames = TRUE,
+           show_colnames = FALSE,
+           fontsize_row = 8,
+           annotation_col = annotation_col,
+           main = title)  # <- 添加标题
+}
+
+```
+
+```{r}
+for (cell_type in cell_type_list) {
+  for (comp in comparison_list) {
+    condition1 <- comp[1]
+    condition2 <- comp[2]
+    message(sprintf("Processing: %s | %s vs %s", cell_type, condition1, condition2))
+
+    # Differential expression
+    deg <- find_marker(
+      seurat_obj = cell_subsets[[cell_type]],
+      condition1 = condition1,
+      condition2 = condition2,
+      group.by = "group_combined"
+    )
+
+    # Heatmap plot with title
+    plot_heatmap(
+      deg = deg,
+      seurat_obj = cell_subsets[[cell_type]],
+      condition_column = "group_combined",
+      condition1 = condition1,
+      condition2 = condition2,
+      top_n = 20,
+      title = paste(cell_type, ":", condition1, "vs", condition2)
+    )
+  }
+}
+
 ```
 
