@@ -10,20 +10,20 @@ library(shadowtext)
 ```
 
 ```{r}
-names(OLOPC_19_subs@assays)
+names(OLOPC_19_fix@assays)
 ```
 
 ```{r}
 #explicitly naming the assay:
 counts_mat <- as.matrix(
   GetAssayData(
-    object = OLOPC_19_subs,
+    object = OLOPC_19_fix,
     assay  = "RNA", 
     layer   = "counts"
   )
 )
-DefaultAssay(OLOPC_19_subs) <- "RNA"
-counts_mat <- as.matrix( GetAssayData(OLOPC_19_subs, slot = "counts") )
+DefaultAssay(OLOPC_19_fix) <- "RNA"
+counts_mat <- as.matrix( GetAssayData(OLOPC_19_fix, slot = "counts") )
 ```
 
 
@@ -241,7 +241,7 @@ dc_coords$cell <- rownames(dc_coords)
 # 2) Build a node‐metadata frame and pull in the Seurat cluster
 node_df <- dc_coords
 node_df$cluster <- factor(
-  OLOPC_19_subs@meta.data[node_df$cell, "cluster"], 
+  OLOPC_19_fix@meta.data[node_df$cell, "cluster"], 
   levels = c("OPC","COP","NFOL","MOL_DA","MOL")
 )
 
@@ -271,7 +271,7 @@ ggplot() +
 ```{r check celltype in each arm}
 ct_by_arm <- table(
   Arm      = branches3[names(branches3)],
-  CellType = OLOPC_19_subs@meta.data$cluster
+  CellType = OLOPC_19_fix@meta.data$cluster
 )
 
 print(ct_by_arm)
@@ -292,14 +292,14 @@ Arm 2: MOL_DA
 Arm 3: MOL
 
 ```{r}
-unique(OLOPC_19_subs$predicted.cluster)
+unique(OLOPC_19_fix$predicted.cluster)
 ```
 
 ```{r}
-unique(OLOPC_19_subs$predicted.subclass)
+unique(OLOPC_19_fix$predicted.subclass)
 ```
 
 ```{r}
-unique(OLOPC_19_subs$cluster)
+unique(OLOPC_19_fix$cluster)
 ```
 
