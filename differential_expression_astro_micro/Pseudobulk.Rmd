@@ -1,0 +1,239 @@
+---
+title: "pseudobulk"
+output: pdf_document
+date: "2025-05-15"
+---
+
+regular differential expression -> Perform DE analysis after pseudobulking ->Per form DE analysis within the same cell type across conditions ->
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## CHECK DIFFERENTIAL EXPRESSION 
+ 
+```{r Load library}
+library(dplyr)
+library(Seurat)
+library(DESeq2)
+
+```
+
+```{r}
+
+UMAP_cluster_ids <- c(
+  "0" = "Oligodendrocytes",
+  "1" = "L2/3IT",
+  "2" = "L5IT",
+  "3" = "L6IT",
+  "4" = "L5ET",
+  "5" = "Microglia",
+  "6" = "Astrocytes", 
+  "7" = "L6CT",
+  "8" = "VIP/Lamp5IN",
+  "9" = "L2/3IT",
+  "10" = "SST/PVIN",
+  "11" = "Oligodendrocytes",
+  "12" = "OPC",
+  "13" = "L5/6NP",
+  "14" = "Microglia",
+  "15" = "Astrocytes", 
+  "16" = "VLMC",
+  "17" = "Endo",
+  "18" = "VLMC",
+  "19" = "Pericytes", 
+  "20" = "L2/3IT",
+  "21" = "Microglia"
+)
+Idents(obj) <- obj$seurat_clusters
+names(UMAP_cluster_ids) <- levels(obj)
+obj <- RenameIdents(obj, UMAP_cluster_ids)
+```
+
+```{r}
+cell_type_list <- c("Astrocytes", "Microglia", "L5IT", "L6IT", "L5ET", "L6CT", "L2/3IT")
+
+group_cluster <- function(cell_type) {
+  subset(obj, idents = cell_type)
+}
+
+cell_subsets <- lapply(cell_type_list, group_cluster)
+names(cell_subsets) <- cell_type_list
+
+```
+
+
+```{r}
+# Subset subtype to only include those with fewer than 3000 detected genes
+filter_gene <- function(seurat_obj) {
+  subset(seurat_obj, subset = nFeature_RNA < 3000)
+}
+
+cell_subsets <- lapply(cell_subsets, filter_gene)
+
+```
+
+```{r}
+add_group_combined <- function(seurat_obj) {
+  seurat_obj$group_combined <- case_when(
+    seurat_obj$orig.ident %in% c("tambexA", "tambexB", "tambexC") ~ "tambex",
+    seurat_obj$orig.ident %in% c("vehA", "vehB", "vehC") ~ "veh",
+    seurat_obj$orig.ident %in% c("naiveB", "naiveC") ~ "naive",
+    seurat_obj$orig.ident %in% c("cpzB", "cpzC") ~ "cpz",
+    TRUE ~ as.character(seurat_obj$orig.ident)
+  )
+  return(seurat_obj)
+}
+
+cell_subsets <- lapply(cell_subsets, add_group_combined)
+
+```
+
+```{r}
+comparison_list <- list(
+  c("tambex1wk", "veh1wk"),
+  c("tambex", "veh"),
+  c("naive", "cpz")
+)
+```
+
+```{r}
+library(tibble)
+run_pseudobulk_deg <- function(seurat_obj, group_col = "group_combined", condition1, condition2) {
+  meta <- seurat_obj@meta.data
+  meta$sample_id <- meta$orig.ident
+  counts <- GetAssayData(seurat_obj, layer = "counts")
+  
+  # Melt and aggregate
+  counts_df <- as.data.frame(as.matrix(counts))
+  counts_df$gene <- rownames(counts_df)
+  counts_long <- reshape2::melt(counts_df, id.vars = "gene")
+  colnames(counts_long) <- c("gene", "cell", "count")
+  counts_long$sample_id <- meta$orig.ident[match(counts_long$cell, rownames(meta))]
+  
+  summary_df <- counts_long %>%
+    group_by(gene, sample_id) %>%
+    summarise(count = sum(count), .groups = "drop") %>%
+    pivot_wider(names_from = sample_id, values_from = count, values_fill = 0)
+  
+  # Matrix for DESeq2
+  gene_names <- summary_df$gene
+  pb_matrix <- as.matrix(summary_df[,-1])
+  rownames(pb_matrix) <- gene_names
+  
+  # Metadata
+  sample_meta <- meta %>%
+    distinct(sample_id, group = .data[[group_col]]) %>%
+    filter(sample_id %in% colnames(pb_matrix))
+  rownames(sample_meta) <- sample_meta$sample_id
+  sample_meta <- sample_meta[colnames(pb_matrix), , drop = FALSE]
+  
+  # Run DESeq2
+  dds <- DESeqDataSetFromMatrix(countData = pb_matrix, colData = sample_meta, design = ~ group)
+  dds <- DESeq(dds)
+  res <- results(dds, contrast = c("group", condition1, condition2))
+  res_df <- as.data.frame(res)
+  res_df$gene <- rownames(res_df)
+  res_df <- res_df[order(res_df$padj), ]
+  return(res_df)
+}
+
+
+```
+
+```{r}
+library(tidyr)
+
+pseudobulk_results <- list()
+
+for (ct in cell_type_list) {
+  for (comp in comparison_list) {
+    condition1 <- comp[1]
+    condition2 <- comp[2]
+    key <- paste(ct, condition1, "vs", condition2, sep = "_")
+    
+    message(sprintf("Running pseudobulk DEG for %s: %s vs %s", ct, condition1, condition2))
+    res <- run_pseudobulk_deg(cell_subsets[[ct]], condition1 = condition1, condition2 = condition2)
+    pseudobulk_results[[key]] <- res
+  }
+}
+```
+
+```{r}
+library(ggplot2)
+library(ggrepel)
+
+plot_volcano <- function(deg, title) {
+
+  deg$gene <- rownames(deg)
+
+  # Normalize column names 
+  if (!"avg_log2FC" %in% colnames(deg)) {
+    deg$avg_log2FC <- deg$log2FoldChange
+  }
+  if (!"p_val_adj" %in% colnames(deg)) {
+    deg$p_val_adj <- deg$padj
+  }
+
+  deg$log10p <- -log10(deg$p_val_adj)
+  deg$log10p[is.infinite(deg$log10p)] <- NA  # handle p_val_adj == 0
+  deg$log10p_capped <- pmin(deg$log10p, 50)
+
+  deg$significance <- ifelse(
+    deg$p_val_adj < 0.05 & abs(deg$avg_log2FC) > 0.25,
+    "Significant", "Not significant"
+  )
+
+  deg$label <- NA
+  score <- deg$log10p * abs(deg$avg_log2FC)
+  top30 <- order(score, decreasing = TRUE)[1:30]
+  deg$label[top30] <- deg$gene[top30]
+
+  ggplot(deg, aes(x = avg_log2FC, y = log10p_capped)) +
+    geom_point(aes(color = significance), alpha = 0.5, size = 1.5) +
+    geom_text_repel(aes(label = label), size = 2.5, max.overlaps = 30, box.padding = 0.5) +
+    geom_vline(xintercept = c(-0.25, 0.25), linetype = "dotted", color = "black") +
+    geom_hline(yintercept = -log10(0.05), linetype = "dotted", color = "black") +
+    scale_color_manual(values = c("Significant" = "firebrick", "Not significant" = "grey80")) +
+    labs(
+      title = title,
+      x = "Log2 Fold Change",
+      y = "-log10 Adjusted P-value",
+      color = "Significance"
+    ) +
+    theme_minimal(base_size = 13) +
+    theme(plot.title = element_text(hjust = 0.5))
+}
+```
+
+```{r}
+library(openxlsx)
+#using xlsx to store all pages
+wb <- createWorkbook()
+
+# Loop over pseudobulk DEG results
+for (key in names(pseudobulk_results)) {
+  deg <- pseudobulk_results[[key]]
+
+  # Skip empty or
+  if (!is.null(deg) && nrow(deg) > 0) {
+    # Rename columns
+    colnames(deg)[colnames(deg) == "log2FoldChange"] <- "avg_log2FC"
+    colnames(deg)[colnames(deg) == "padj"] <- "p_val_adj"
+
+    # Add sheet to Excel
+    sheet_name <- substr(key, 1, 31)
+    addWorksheet(wb, sheet_name)
+    writeData(wb, sheet = sheet_name, deg, rowNames = FALSE)
+
+    # Plot
+    print(plot_volcano(deg, title = key))
+  } else {
+    message(sprintf("skips", key))
+  }
+}
+
+saveWorkbook(wb, file = "Pseudobulk_DEGs.xlsx", overwrite = TRUE)
+
+```
+
