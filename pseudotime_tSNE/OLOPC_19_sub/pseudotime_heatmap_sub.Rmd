@@ -1,0 +1,358 @@
+---
+title: "heatmap"
+output: html_document
+date: "2025-05-20"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# Load libraries
+library(SingleCellExperiment)
+library(slingshot)
+library(Seurat)
+library(ggplot2)
+```
+
+```{r}
+#using 15 PCs causes clusters 3 and 0 to disappear from pseudotime trajectory
+#17 PCs missing cluster 1
+#20 PCs?
+OLOPC_19_subs <- RunTSNE(OLOPC_19_subs, dims = 1:20)
+```
+
+
+```{r}
+# Convert Seurat object to SingleCellExperiment, assign cluster labels
+sce <- as.SingleCellExperiment(OLOPC_19_subs)
+sce$cluster <- OLOPC_19_subs$seurat_clusters  # use Seurat cluster info
+```
+
+```{r}
+#runs the Slingshot pseudotime
+sce <- slingshot(sce, reducedDim = 'PCA')
+```
+
+
+
+```{r}
+#Transfers the pseudotime values computed by Slingshot into Seurat object.
+OLOPC_19_subs$pseudotime <- sce$slingPseudotime_1
+```
+
+```{r}
+OLOPC_19_subs$cluster
+```
+
+```{r}
+OLOPC_19_subs$pseudotime
+```
+
+```{r}
+ptm <- slingPseudotime(sce)  
+```
+
+
+```{r}
+df <- data.frame(
+  cell      = rownames(ptm),                  
+  condition = OLOPC_19_subs$condition,        
+  cluster = OLOPC_19_subs$cluster,
+  ptm,                                        
+  row.names = NULL,                           
+  check.names = FALSE                         
+)
+
+# 3) Peek
+head(df)
+```
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+
+df_long <- df %>%
+  pivot_longer(
+    cols      = starts_with("Lineage"),
+    names_to  = "lineage",
+    values_to = "pseudotime"
+  ) %>%
+  filter(!is.na(pseudotime))
+ggplot(df_long, aes(x = pseudotime, color = cluster)) +
+  geom_density(size = 1) +
+  facet_wrap(~ lineage, scales = "free") +
+  labs(
+    x     = "Pseudotime",
+    y     = "Density",
+    color = "Cluster",
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position  = "right",
+    strip.text       = element_text(face = "bold"),
+    axis.text.x      = element_text(angle = 0, vjust = 0.5)
+  )
+
+```
+
+
+```{r}
+
+library(dplyr)
+
+df <- df %>%
+  mutate(stage = case_when(
+    Lineage1 >=   0 & Lineage1 <  10 ~ "HMOL",
+    Lineage1 >=  10 & Lineage1 <  30 ~ "MOL",
+    Lineage1 >=  30 & Lineage1 <  40 ~ "INT",
+    Lineage1 >=  40 & Lineage1 <= 60 ~ "OPC",
+    TRUE                                  ~ NA_character_
+  ))
+
+```
+
+```{r}
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+df_prop <- df %>%
+  filter(!is.na(stage)) %>%
+  group_by(condition, stage) %>%
+  summarise(n = n(), .groups="drop") %>%
+  group_by(condition) %>%
+  mutate(prop = n / sum(n)) %>%
+  ungroup() %>%
+  mutate(stage = factor(stage, levels = c("OPC","INT","MOL","HMOL")))
+
+mid_pt <- median(df_prop$prop)
+
+ggplot(df_prop, aes(condition, stage, fill = prop)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient2(
+    low      = "blue", 
+    mid      = "white", 
+    high     = "red", 
+    midpoint = mid_pt, 
+    name     = "Cell\nProp"
+  ) +
+  labs(x = "Condition", y = "Stage") +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid  = element_blank()
+  )
+
+```
+
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+df_count <- df %>%
+  filter(!is.na(stage)) %>%
+  count(condition, stage)
+
+df_norm <- df_count %>%
+  group_by(stage) %>%
+  mutate(
+    prop  = n / sum(n), 
+    prop_norm = prop / max(prop)
+  ) %>%
+  ungroup() %>%
+  mutate(stage = factor(stage, levels = c("OPC","INT","MOL","HMOL")))
+
+ggplot(df_norm, aes(x = condition, y = stage, fill = prop_norm)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient2(
+    low      = "blue",
+    mid      = "white",
+    high     = "red",
+    midpoint = 0.5, 
+    name     = "Scaled\nProp"
+  ) +
+  labs(x = "Condition", y = "Stage") +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid  = element_blank()
+  )
+
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+
+df_prop <- df %>%
+  filter(!is.na(stage)) %>%
+  count(condition, stage) %>%
+  group_by(condition) %>%
+  mutate(prop = n / sum(n)) %>%    # true proportion of all cells
+  ungroup() %>%
+  mutate(stage = factor(stage, levels = c("OPC","INT","MOL","HMOL")))
+
+df_big  <- df_prop %>% filter(stage %in% c("OPC","INT","MOL"))
+df_hmol <- df_prop %>% filter(stage == "HMOL")
+
+plot_heat <- function(data, title) {
+  ggplot(data, aes(condition, stage, fill = prop)) +
+    geom_tile(color = "white") +
+    scale_fill_gradient2(
+      low      = "blue",
+      mid      = "white",
+      high     = "red",
+      midpoint = median(df_prop$prop),  # center on the global median
+      name     = "Prop"
+    ) +
+    labs(title = title, x = NULL, y = NULL) +
+    theme_minimal(base_size = 14) +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      panel.grid  = element_blank(),
+      plot.title  = element_text(face = "bold", hjust = 0.5)
+    )
+}
+
+p1 <- plot_heat(df_big,  "OPC / INT / MOL")
+p2 <- plot_heat(df_hmol, "HMOL")
+
+p1 | p2
+
+# (Optional) Save
+ggsave("two_heatmaps_true_prop.pdf", width = 10, height = 4)
+
+```
+
+```{r}
+df$ident <- OLOPC_19_subs$orig.ident
+```
+
+```{r}
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+df_prop <- df %>%
+  filter(!is.na(stage)) %>%
+  group_by(ident, stage) %>%
+  summarise(n = n(), .groups="drop") %>%
+  group_by(ident) %>%
+  mutate(prop = n / sum(n)) %>%
+  ungroup() %>%
+  mutate(stage = factor(stage, levels = c("OPC","INT","MOL","HMOL")))
+
+mid_pt <- median(df_prop$prop)
+
+ggplot(df_prop, aes(ident, stage, fill = prop)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient2(
+    low      = "blue", 
+    mid      = "white", 
+    high     = "red", 
+    midpoint = mid_pt, 
+    name     = "Cell\nProp"
+  ) +
+  labs(x = "Ident", y = "Stage") +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid  = element_blank()
+  )
+
+```
+
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+df_norm <- df %>%
+  filter(!is.na(stage)) %>%
+  count(ident, stage) %>%
+  group_by(ident) %>%
+  mutate(prop = n / sum(n)) %>%
+  ungroup() %>%
+  group_by(stage) %>%
+  mutate(prop_norm = prop / max(prop)) %>%
+  ungroup() %>%
+  mutate(stage = factor(stage, levels = c("OPC","INT","MOL","HMOL")))
+
+ggplot(df_norm, aes(x = ident, y = stage, fill = prop_norm)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient2(
+    low      = "blue", 
+    mid      = "white", 
+    high     = "red", 
+    midpoint = 0.5,
+    name     = "Scaled\nProp"
+  ) +
+  labs(x = "Ident", y = "Stage") +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid  = element_blank()
+  )
+
+```
+
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+
+df_count <- df %>%
+  filter(!is.na(stage)) %>%
+  count(ident, stage)
+
+totals <- df_count %>%
+  group_by(ident) %>%
+  summarise(total = sum(n), .groups="drop")
+
+df_prop <- df_count %>%
+  left_join(totals, by = "ident") %>%
+  mutate(
+    prop = n / total,
+    stage = factor(stage, levels = c("OPC","INT","MOL","HMOL"))
+  )
+
+df_big  <- filter(df_prop, stage %in% c("OPC","INT","MOL"))
+df_hmol <- filter(df_prop, stage == "HMOL")
+
+plot_heat <- function(data, title) {
+  ggplot(data, aes(x = ident, y = stage, fill = prop)) +
+    geom_tile(color = "white") +
+    scale_fill_gradient2(
+      low      = "blue",
+      mid      = "white",
+      high     = "red",
+      midpoint = median(df_prop$prop),
+      name     = "Prop"
+    ) +
+    labs(title = title, x = NULL, y = NULL) +
+    theme_minimal(base_size = 14) +
+    theme(
+      axis.text.x  = element_text(angle = 45, hjust = 1),
+      panel.grid   = element_blank(),
+      plot.title   = element_text(face = "bold", hjust = 0.5)
+    )
+}
+
+# 6) Draw side by side
+p1 <- plot_heat(df_big,  "OPC / INT / MOL")
+p2 <- plot_heat(df_hmol, "HMOL")
+
+p1 | p2
+
+```

@@ -50,7 +50,7 @@ highVar    <- which(df$relVar >= 0.5)
 NormGenes  <- rownames(df)[highVar]
 length(NormGenes)  # how many HVGs
 ```
-
+ 
 ```{r build DPT}
 # build the diffusion map 
 expr_log <- t(log1p(emat[NormGenes,]))
@@ -196,7 +196,7 @@ library(ggforce)
 library(viridis)
 
 # 1) Extract DC2/DC3 coordinates from  DiffusionMap:
-dc_coords <- as.data.frame(dm@eigenvectors[, 2:3])
+dc_coords <- as.data.frame(dm@eigenvectors[, 1:2])
 colnames(dc_coords) <- c("X", "Y")
 dc_coords$cell <- rownames(dc_coords)
 
@@ -233,12 +233,12 @@ library(ggforce)
 library(viridis)
 library(igraph)
 
-# 1) Extract DC2/DC3 coordinates from your DiffusionMap:
+# Extract DC2/DC3 coordinates from your DiffusionMap:
 dc_coords <- as.data.frame(dm@eigenvectors[, 2:3])
 colnames(dc_coords) <- c("X", "Y")
 dc_coords$cell <- rownames(dc_coords)
 
-# 2) Build a node‐metadata frame and pull in the Seurat cluster
+# Build a node‐metadata frame and pull in the Seurat cluster
 node_df <- dc_coords
 node_df$cluster <- factor(
   OLOPC_19_fix@meta.data[node_df$cell, "cluster"], 
@@ -252,7 +252,16 @@ el$y1 <- dc_coords$Y[ match(el$from, dc_coords$cell) ]
 el$x2 <- dc_coords$X[ match(el$to,   dc_coords$cell) ]
 el$y2 <- dc_coords$Y[ match(el$to,   dc_coords$cell) ]
 
-# 4) Plot with ggplot2 + ggforce, coloring by Seurat cluster:
+set.seed(42)
+node_df <- node_df[sample(nrow(node_df)), ]
+custom_colors <- c(
+  "OPC"     = "#1f77b4",  # blue
+  "COP"     = "#ff7f0e",  # orange
+  "NFOL"    = "#2ca02c",  # green
+  "MOL_DA"  = "#d62728",  # red
+  "MOL"     = "#9467bd"   # purple
+)
+
 ggplot() +
   geom_segment(data=el,
                aes(x=x1,y=y1,xend=x2,yend=y2),
@@ -260,11 +269,17 @@ ggplot() +
   geom_point(data=node_df,
              aes(x=X,y=Y, color=cluster),
              size=1.2) +
-  scale_color_viridis_d(name="Cell Type", 
-                        option="A",
-                        begin=0.2, end=0.8) +
+  scale_color_manual(values=custom_colors, name="Cell Type") +
   theme_void() +
   ggtitle("SCN3E Network Embedding\n(DC2 vs DC3, colored by cluster)")
+
+ggsave("SCN3Eplot.pdf", width=8, height=6, dpi=300)
+
+
+
+```
+
+```{r}
 
 ```
 
@@ -301,5 +316,202 @@ unique(OLOPC_19_fix$predicted.subclass)
 
 ```{r}
 unique(OLOPC_19_fix$cluster)
+```
+
+```{r}
+table(OLOPC_19_fix$cluster)
+
+```
+
+```{r}
+table(node_df$cluster)
+
+```
+
+
+```{r}
+set.seed(42)
+node_df <- node_df[sample(nrow(node_df)), ]
+node_df$cluster <- factor(node_df$cluster,
+                          levels=c("OPC","COP","NFOL","MOL_DA","MOL"))
+custom_colors <- setNames(c("#1f77b4","#ff7f0e","#2ca02c","#d62728","#9467bd"),
+                          levels(node_df$cluster))
+
+ggplot() +
+  geom_segment(data=el,
+               aes(x=x1,y=y1,xend=x2,yend=y2),
+               color="grey80", size=0.2, alpha=0.4) +
+  geom_point(data=node_df,
+             aes(x=X,y=Y,color=cluster),
+             size=1.2, alpha=0.5) +
+  scale_color_manual(values=custom_colors, name="Cell Type") +
+  theme_void() +
+  ggtitle("SCN3E Network Embedding\n(DC2 vs DC3)")
+
+```
+
+```{r}
+table(node_df$cluster)
+```
+
+
+```{r}
+# 1) network 当前有多少节点
+length(V(g))  
+# [1] 10178
+
+# 2) 全细胞总数
+all_cells <- rownames(OLOPC_19_fix@meta.data)
+length(all_cells)  
+# [1] 10189
+
+# 3) 丢失的 barcode
+missing_cells <- setdiff(all_cells, V(g)$name)
+length(missing_cells)  
+# [1] 11
+
+# 4) 这 11 个都是什么 cluster？
+table(OLOPC_19_fix$cluster[ match(missing_cells, all_cells) ])
+
+```
+```{r}
+library(ggplot2)
+library(ggforce)
+
+# 打乱顺序，保持透明度让边和点都能看到
+set.seed(42)
+node_df2 <- node_df[sample(nrow(node_df)), ]
+
+# 直接在 node_df2 里画所有边和点，但分面按 cluster
+ggplot() +
+  geom_segment(data=el,
+               aes(x=x1,y=y1,xend=x2,yend=y2),
+               color="grey80", size=0.2, alpha=0.4) +
+  geom_point(data=node_df2,
+             aes(x=X,y=Y),
+             size=1.2, alpha=0.6, color="black") +
+  geom_point(data=node_df2,
+             aes(x=X,y=Y, color=cluster),
+             size=1.2, alpha=0.8) +
+  scale_color_manual(values=custom_colors) +
+  facet_wrap(~ cluster, ncol=2) +
+  theme_void() +
+  theme(legend.position="none") +
+  ggtitle("SCN3E Embedding by Cluster")
+
+```
+```{r}
+library(plotly)
+
+# build a data.frame with the first three DCs and cluster
+df3 <- data.frame(
+  DC1     = dm@eigenvectors[,1],
+  DC2     = dm@eigenvectors[,2],
+  DC3     = dm@eigenvectors[,3],
+  cluster = node_df$cluster
+)
+
+plot_ly(
+  data = df3,
+  x    = ~DC1, y = ~DC2, z = ~DC3,
+  color = ~cluster,
+  colors = c("#1f77b4","#ff7f0e","#2ca02c","#d62728","#9467bd"),
+  type  = "scatter3d",
+  mode  = "markers",
+  marker = list(size = 3, opacity = 0.8)
+) %>%
+  layout(
+    scene = list(
+      xaxis = list(title = "DC1"),
+      yaxis = list(title = "DC2"),
+      zaxis = list(title = "DC3")
+    ),
+    legend = list(title = list(text="Cluster"))
+  )
+
+```
+
+```{r}
+library(igraph)
+library(plotly)
+
+# 1) Build/clean your graph as before
+g <- graph_from_data_frame(edges, directed=FALSE)
+g <- simplify(g, remove.multiple=TRUE, remove.loops=TRUE,
+              edge.attr.comb=list(weight="max"))
+isolates <- V(g)[degree(g)==0]
+if (length(isolates)) g <- delete_vertices(g, isolates)
+
+# 2) Compute a 3D force-directed layout
+#    dim=3 tells igraph to give x,y,z coords
+layout_3d <- layout_with_fr(
+  g,
+  weights    = E(g)$weight,
+  niter      = 2000,    # you can lower this if it's slow
+  start.temp = sqrt(vcount(g)),
+  dim        = 3
+)
+rownames(layout_3d) <- V(g)$name
+
+# 3) Prepare node dataframe
+node_df <- data.frame(
+  cell    = V(g)$name,
+  X       = layout_3d[,1],
+  Y       = layout_3d[,2],
+  Z       = layout_3d[,3],
+  cluster = OLOPC_19_fix@meta.data[V(g)$name, "cluster"],
+  stringsAsFactors = FALSE
+)
+
+# 4) Prepare edge traces for Plotly
+#    we’ll build one big “line” trace per edge, interleaving NULLs
+edge_traces <- lapply(seq_len(ecount(g)), function(i) {
+  e   <- ends(g, E(g)[i])
+  x0  <- layout_3d[e[1],1]; y0 <- layout_3d[e[1],2]; z0 <- layout_3d[e[1],3]
+  x1  <- layout_3d[e[2],1]; y1 <- layout_3d[e[2],2]; z1 <- layout_3d[e[2],3]
+  list(
+    x = c(x0, x1, NA),
+    y = c(y0, y1, NA),
+    z = c(z0, z1, NA)
+  )
+})
+
+# 5) Start the Plotly scene
+p <- plot_ly(type = "scatter3d", mode = "lines",
+             line = list(color = "grey80", width = 1),
+             showlegend = FALSE)
+
+# 6) Add each edge
+for (tr in edge_traces) {
+  p <- add_trace(p, x = tr$x, y = tr$y, z = tr$z)
+}
+
+# 7) Add the nodes on top
+p <- add_trace(
+  p,
+  data = node_df,
+  x    = ~X,
+  y    = ~Y,
+  z    = ~Z,
+  color = ~cluster,
+  colors = c("OPC"="#1f77b4","COP"="#ff7f0e","NFOL"="#2ca02c",
+             "MOL_DA"="#d62728","MOL"="#9467bd"),
+  type  = "scatter3d",
+  mode  = "markers",
+  marker = list(size=3, opacity=0.8)
+)
+
+# 8) Tidy up axes & legend
+p <- layout(p,
+            scene = list(
+              xaxis = list(title="DC2"),
+              yaxis = list(title="DC3"),
+              zaxis = list(title="DC4")  # you can relabel as you like
+            ),
+            legend = list(title=list(text="Cluster"))
+)
+
+p
+
 ```
 
