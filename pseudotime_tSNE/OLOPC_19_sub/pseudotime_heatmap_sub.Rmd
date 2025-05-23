@@ -227,9 +227,6 @@ p2 <- plot_heat(df_hmol, "HMOL")
 
 p1 | p2
 
-# (Optional) Save
-ggsave("two_heatmaps_true_prop.pdf", width = 10, height = 4)
-
 ```
 
 ```{r}
@@ -349,10 +346,9 @@ plot_heat <- function(data, title) {
     )
 }
 
-# 6) Draw side by side
 p1 <- plot_heat(df_big,  "OPC / INT / MOL")
 p2 <- plot_heat(df_hmol, "HMOL")
 
 p1 | p2
-
 ```
+

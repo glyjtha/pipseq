@@ -356,21 +356,17 @@ table(node_df$cluster)
 
 
 ```{r}
-# 1) network 当前有多少节点
 length(V(g))  
 # [1] 10178
 
-# 2) 全细胞总数
 all_cells <- rownames(OLOPC_19_fix@meta.data)
 length(all_cells)  
 # [1] 10189
 
-# 3) 丢失的 barcode
 missing_cells <- setdiff(all_cells, V(g)$name)
 length(missing_cells)  
 # [1] 11
 
-# 4) 这 11 个都是什么 cluster？
 table(OLOPC_19_fix$cluster[ match(missing_cells, all_cells) ])
 
 ```
@@ -378,11 +374,9 @@ table(OLOPC_19_fix$cluster[ match(missing_cells, all_cells) ])
 library(ggplot2)
 library(ggforce)
 
-# 打乱顺序，保持透明度让边和点都能看到
 set.seed(42)
 node_df2 <- node_df[sample(nrow(node_df)), ]
 
-# 直接在 node_df2 里画所有边和点，但分面按 cluster
 ggplot() +
   geom_segment(data=el,
                aes(x=x1,y=y1,xend=x2,yend=y2),
@@ -400,6 +394,7 @@ ggplot() +
   ggtitle("SCN3E Embedding by Cluster")
 
 ```
+
 ```{r}
 library(plotly)
 

@@ -9,6 +9,11 @@ library(viridis)
 library(shadowtext)
 ```
 
+
+```{r}
+unique(OLOPC_19_subs$predicted.subclass)
+```
+
 ```{r}
 names(OLOPC_19_subs@assays)
 ```
@@ -102,7 +107,7 @@ table(branches3, useNA = "ifany")
 ```
 
 ```{r}
-branches3
+#branches3
 ```
 
 
@@ -228,43 +233,169 @@ ggplot() +
 ```
 
 ```{r}
-library(ggplot2)
-library(ggforce)
-library(viridis)
-library(igraph)
+unique(OLOPC_19_subs$cluster)
+```
 
-# 1) Extract DC2/DC3 coordinates from your DiffusionMap:
-dc_coords <- as.data.frame(dm@eigenvectors[, 2:3])
-colnames(dc_coords) <- c("X", "Y")
-dc_coords$cell <- rownames(dc_coords)
 
-# 2) Build a node‐metadata frame and pull in the Seurat cluster
-node_df <- dc_coords
-node_df$cluster <- factor(
-  OLOPC_19_subs@meta.data[node_df$cell, "cluster"], 
-  levels = c("OPC","COP","NFOL","MOL_DA","MOL")
+```{r}
+# your mapping of numeric → name
+OL_subcluster_ids <- c(
+  "0" = "MOL1/2",
+  "1" = "MOL5/6",
+  "2" = "OPC",
+  "3" = "MOL3/4",
+  "4" = "MOL_DA",
+  "5" = "COP",
+  "6" = "COP",
+  "7" = "NFOL"
 )
 
-# 3) Turn your igraph object into an edge‐list with coordinates:
-el <- as_data_frame(g, what="edges")
-el$x1 <- dc_coords$X[ match(el$from, dc_coords$cell) ]
-el$y1 <- dc_coords$Y[ match(el$from, dc_coords$cell) ]
-el$x2 <- dc_coords$X[ match(el$to,   dc_coords$cell) ]
-el$y2 <- dc_coords$Y[ match(el$to,   dc_coords$cell) ]
+# start from your dc_coords
+node_df <- dc_coords
 
-# 4) Plot with ggplot2 + ggforce, coloring by Seurat cluster:
+# grab the numeric cluster from your Seurat object’s metadata:
+num_clus <- OLOPC_19_subs$seurat_clusters
+
+# map to the named vector, then factor with your desired ordering:
+node_df$cluster <- factor(
+  OL_subcluster_ids[ as.character(num_clus) ],
+  levels = c("OPC","COP","NFOL","MOL_DA","MOL1/2","MOL3/4","MOL5/6")
+)
+
+node_df$seurat_cluster <-OLOPC_19_subs$seurat_clusters
+# inspect
+head(node_df)
+
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(igraph)
+
+dc_coords <- dm@eigenvectors[, 2:3] %>%
+  as.data.frame() %>%
+  setNames(c("X","Y")) %>%
+  tibble::rownames_to_column("cell")
+
+OL_subcluster_ids <- c(
+  "0"     = "MOL1/2",
+  "1"     = "MOL5/6",
+  "2"     = "OPC",
+  "3"     = "MOL3/4",
+  "4"     = "MOL_DA",
+  "5"     = "COP",
+  "6"     = "COP",
+  "7"     = "NFOL"
+)
+
+node_df <- dc_coords %>%
+  mutate(
+    seurat_cluster = OLOPC_19_subs$seurat_clusters,
+    cluster        = factor(
+      OL_subcluster_ids[as.character(seurat_cluster)],
+      levels = c("OPC","COP","NFOL","MOL_DA","MOL1/2","MOL3/4","MOL5/6")
+    )
+  ) %>%
+  slice_sample(prop = 1)
+
+el <- as_data_frame(g, what="edges") %>%
+  left_join(dc_coords,    by = c("from" = "cell")) %>%
+  rename(x1 = X, y1 = Y) %>%
+  left_join(dc_coords,    by = c("to"   = "cell")) %>%
+  rename(x2 = X, y2 = Y)
+
+custom_colors <- c(
+  OPC      = "#1f77b4",
+  COP      = "#ff7f0e",
+  NFOL     = "#2ca02c",
+  MOL_DA   = "#d62728",
+  "MOL1/2" = "#9467bd",
+  "MOL3/4" = "#8c564b",
+  "MOL5/6" = "#e377c2"
+)
+
 ggplot() +
-  geom_segment(data=el,
-               aes(x=x1,y=y1,xend=x2,yend=y2),
-               color="grey80", size=0.2, alpha=0.4) +
-  geom_point(data=node_df,
-             aes(x=X,y=Y, color=cluster),
-             size=1.2) +
-  scale_color_viridis_d(name="Cell Type", 
-                        option="A",
-                        begin=0.2, end=0.8) +
+  geom_segment(
+    data = el,
+    aes(x=x1,y=y1,xend=x2,yend=y2),
+    color="grey80", size=0.2, alpha=0.4
+  ) +
+  geom_point(
+    data = node_df,
+    aes(x=X, y=Y, color=cluster),
+    size=1.2
+  ) +
+  scale_color_manual(values = custom_colors, name = "Cell Type") +
   theme_void() +
   ggtitle("SCN3E Network Embedding\n(DC2 vs DC3, colored by cluster)")
+
+```
+
+```{r}
+library(dplyr)
+library(plotly)
+library(igraph)
+
+node3d <- dm@eigenvectors[,1:3] %>%
+  as.data.frame() %>%
+  setNames(c("X","Y","Z")) %>%
+  tibble::rownames_to_column("cell") %>%
+  left_join(
+    node_df %>% select(cell, cluster),
+    by = "cell"
+  )
+
+el <- as_data_frame(g, what = "edges") %>%
+  mutate(
+    x    = node3d$X[   match(from, node3d$cell)],
+    y    = node3d$Y[   match(from, node3d$cell)],
+    z    = node3d$Z[   match(from, node3d$cell)],
+    xend = node3d$X[   match(to,   node3d$cell)],
+    yend = node3d$Y[   match(to,   node3d$cell)],
+    zend = node3d$Z[   match(to,   node3d$cell)]
+  )
+el_coords <- as_data_frame(g, what = "edges") %>%
+  # first join the *from* coords
+  left_join(node3d %>% rename(x = X, y = Y, z = Z),
+            by = c("from" = "cell")) %>%
+  rename(x1 = x, y1 = y, z1 = z) %>%
+  # then join the *to* coords
+  left_join(node3d %>% rename(x = X, y = Y, z = Z),
+            by = c("to"   = "cell")) %>%
+  rename(x2 = x, y2 = y, z2 = z)
+
+
+p <- plot_ly(scene = "scene") %>%
+  add_trace(
+    data = el,
+    x    = ~x,   y    = ~y,   z    = ~z,
+    xend = ~xend,yend = ~yend,zend = ~zend,
+    mode      = "lines",
+    line      = list(color = 'rgba(150,150,150,0.2)', width = 1),
+    inherit    = FALSE,
+    showlegend = FALSE
+  ) %>%
+  add_trace(
+    data = node3d,
+    x    = ~X,  y    = ~Y,  z    = ~Z,
+    color = ~cluster,
+    colors = custom_colors,
+    mode  = "markers",
+    marker= list(size = 3),
+    hoverinfo = 'text',
+    text      = ~paste(cell, cluster, sep = '<br>')
+  ) %>%
+  layout(
+    scene = list(
+      xaxis = list(title = "DC1"),
+      yaxis = list(title = "DC2"),
+      zaxis = list(title = "DC3")
+    ),
+    legend = list(x = 1.02, y = 0.8)
+  )
+
+p
 
 ```
 
