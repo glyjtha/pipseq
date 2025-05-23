@@ -16,7 +16,6 @@ knitr::opts_chunk$set(echo = TRUE)
 library(dplyr)
 library(Seurat)
 library(DESeq2)
-
 ```
 
 ```{r}
@@ -74,12 +73,13 @@ cell_subsets <- lapply(cell_subsets, filter_gene)
 ```
 
 ```{r}
+#REMOVED tembexB, vehB, naiveB, cpzB 5/23/25
 add_group_combined <- function(seurat_obj) {
   seurat_obj$group_combined <- case_when(
-    seurat_obj$orig.ident %in% c("tambexA", "tambexB", "tambexC") ~ "tambex",
-    seurat_obj$orig.ident %in% c("vehA", "vehB", "vehC") ~ "veh",
-    seurat_obj$orig.ident %in% c("naiveB", "naiveC") ~ "naive",
-    seurat_obj$orig.ident %in% c("cpzB", "cpzC") ~ "cpz",
+    seurat_obj$orig.ident %in% c("tambexA", "tambexC") ~ "tambex",
+    seurat_obj$orig.ident %in% c("vehA", "vehC") ~ "veh",
+    seurat_obj$orig.ident %in% c("naiveC") ~ "naive",
+    seurat_obj$orig.ident %in% c("cpzC") ~ "cpz",
     TRUE ~ as.character(seurat_obj$orig.ident)
   )
   return(seurat_obj)
@@ -233,7 +233,7 @@ for (key in names(pseudobulk_results)) {
   }
 }
 
-saveWorkbook(wb, file = "Pseudobulk_DEGs.xlsx", overwrite = TRUE)
+saveWorkbook(wb, file = "Pseudobulk_DEGs_remove_B.xlsx", overwrite = TRUE)
 
 ```
 
