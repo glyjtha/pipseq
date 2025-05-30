@@ -1,0 +1,143 @@
+---
+title: "Untitled"
+output: html_document
+date: "2025-05-30"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+OL_subcluster_ids <- c(
+  "0" = "MOL",
+  "1" = "MOL",
+  "2" = "OPC",
+  "3" = "MOL",
+  "4" = "MOL",
+  "5" = "COP",
+  "6" = "COP",
+  "7" = "NFOL")
+
+Idents(OLOPC_19_subs) <- OLOPC_19_subs$seurat_clusters
+names(OL_subcluster_ids) <- levels(OLOPC_19_subs)
+obj <- RenameIdents(OLOPC_19_subs, OL_subcluster_ids)
+```
+
+```{r}
+cell_type_list <- levels(obj) 
+
+```
+
+
+```{r}
+cell_type_list <- levels(obj)
+
+group_cluster <- function(ct) {
+  subset(obj, idents = ct)
+}
+
+cell_subsets <- lapply(cell_type_list, group_cluster)
+names(cell_subsets) <- cell_type_list
+
+```
+
+
+```{r}
+# Subset subtype to only include those with fewer than 3000 detected genes
+filter_gene <- function(seurat_obj) {
+  subset(seurat_obj, subset = nFeature_RNA < 3000)
+}
+
+cell_subsets <- lapply(cell_subsets, filter_gene)
+
+```
+
+```{r}
+#REMOVED tembexB, vehB, naiveB, cpzB 5/23/25
+add_group_combined <- function(seurat_obj) {
+  seurat_obj$group_combined <- case_when(
+    seurat_obj$orig.ident %in% c("tambexA", "tambexC") ~ "tambex",
+    seurat_obj$orig.ident %in% c("vehA", "vehC") ~ "veh",
+    seurat_obj$orig.ident %in% c("naiveC") ~ "naive",
+    seurat_obj$orig.ident %in% c("cpzC") ~ "cpz",
+    TRUE ~ as.character(seurat_obj$orig.ident)
+  )
+  return(seurat_obj)
+}
+
+cell_subsets <- lapply(cell_subsets, add_group_combined)
+
+```
+
+
+```{r}
+library(tibble)
+run_pseudobulk_deg <- function(seurat_obj, comparisons,
+                               min_cells = 20, min_genes = 10,
+                               design_formula = ~ group_combined) {
+
+  # keep ≥ min_cells 
+  cells_per_sample <- table(seurat_obj$orig.ident)
+  keep_samples     <- names(cells_per_sample[cells_per_sample >= min_cells])
+  seurat_obj       <- subset(seurat_obj, subset = orig.ident %in% keep_samples)
+
+  # pseudobulk aggregation
+  agg <- AggregateExpression(
+           seurat_obj,
+           assays   = "RNA",
+           slot     = "counts",
+           group.by = "orig.ident"
+         )$RNA
+  counts_mat <- round(agg)
+
+  #sample meta
+  sample_meta <- seurat_obj@meta.data %>%
+    dplyr::select(orig.ident, group_combined) %>%   
+    dplyr::distinct() %>%                           
+    as.data.frame()                                 
+  rownames(sample_meta) <- sample_meta$orig.ident  
+  sample_meta$orig.ident <- NULL                  
+
+  # check count_mat
+  sample_meta <- sample_meta[colnames(counts_mat), , drop = FALSE]
+
+  # DESEQ2
+  dds  <- DESeqDataSetFromMatrix(countData = counts_mat,
+                                 colData   = sample_meta,
+                                 design    = design_formula)
+
+  keep <- rowSums(counts(dds) >= min_genes) >= 2
+  dds  <- dds[keep, ]
+  dds  <- DESeq(dds)
+
+  res_list <- lapply(comparisons, function(comp) {
+    res <- results(dds, contrast = c("group_combined", comp[1], comp[2])) |>
+           as.data.frame() |>
+           tibble::rownames_to_column("gene") |>
+           dplyr::arrange(padj)
+    attr(res, "contrast") <- paste(comp[1], "vs", comp[2])
+    res
+  })
+  names(res_list) <- sapply(comparisons, \(x) paste(x[1], "vs", x[2]))
+  res_list
+}
+
+
+```
+
+```{r}
+comparison_list <- list(
+  c("tambex1wk", "veh1wk"),
+  c("tambex", "veh"),
+  c("naive", "cpz")
+)
+```
+
+```{r}
+deg_results <- lapply(cell_subsets, run_pseudobulk_deg,
+                      comparisons = comparison_list)
+names(deg_results) <- cell_type_list
+```
+

@@ -317,19 +317,15 @@ library(VennDiagram)
 library(grid)
 
 venn_diagram <- function(subtype) {
-  # 差异表达分析
   deg_tambex_vs_veh <- find_marker(cell_subsets[[subtype]], "tambex", "veh", group.by = "group_combined")
   deg_naive_vs_cpz  <- find_marker(cell_subsets[[subtype]], "naive",  "cpz",  group.by = "group_combined")
 
-  # 提取显著基因
   sig_genes_tambex <- rownames(deg_tambex_vs_veh[deg_tambex_vs_veh$p_val_adj < 0.05 & abs(deg_tambex_vs_veh$avg_log2FC) > 0.25, ])
   sig_genes_naive  <- rownames(deg_naive_vs_cpz [deg_naive_vs_cpz $p_val_adj < 0.05 & abs(deg_naive_vs_cpz $avg_log2FC) > 0.25, ])
 
-  # 找出重叠的基因
   common_genes <- intersect(sig_genes_tambex, sig_genes_naive)
   print(paste("Overlapping DEGs for", subtype, ":", paste(common_genes, collapse = ", ")))
 
-  # 绘制 Venn 图
   venn.plot <- venn.diagram(
     x = list("Tambex vs Veh" = sig_genes_tambex,
              "Naive vs Cpz"  = sig_genes_naive),
@@ -343,17 +339,15 @@ venn_diagram <- function(subtype) {
     main = paste("Overlap of DEGs -", subtype)
   )
 
-  # 画图并添加标签
   grid.newpage()
   grid.draw(venn.plot)
 
-  # 加入重叠基因标签
   if (length(common_genes) > 0) {
     overlap_label <- paste(common_genes, collapse = ", ")
     grid.text(
       overlap_label,
       x = 0.5,
-      y = 0.8,  # 可根据实际位置微调
+      y = 0.8,  
       gp = gpar(fontsize = 10, col = "black")
     )
   }
