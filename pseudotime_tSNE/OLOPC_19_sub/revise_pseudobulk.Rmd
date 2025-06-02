@@ -4,6 +4,13 @@ output: html_document
 date: "2025-05-30"
 ---
 
+```{r}
+library(dplyr)
+library(tibble)
+library(DESeq2)
+library(Seurat)
+```
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
@@ -40,7 +47,10 @@ group_cluster <- function(ct) {
 
 cell_subsets <- lapply(cell_type_list, group_cluster)
 names(cell_subsets) <- cell_type_list
+```
 
+```{r}
+cell_subsets
 ```
 
 
@@ -58,8 +68,10 @@ cell_subsets <- lapply(cell_subsets, filter_gene)
 #REMOVED tembexB, vehB, naiveB, cpzB 5/23/25
 add_group_combined <- function(seurat_obj) {
   seurat_obj$group_combined <- case_when(
-    seurat_obj$orig.ident %in% c("tambexA", "tambexC") ~ "tambex",
-    seurat_obj$orig.ident %in% c("vehA", "vehC") ~ "veh",
+    seurat_obj$orig.ident %in% c("tambexA") ~ "tambexA",
+    seurat_obj$orig.ident %in% c("tambexC") ~ "tambexC",
+    seurat_obj$orig.ident %in% c("vehA") ~ "vehA",
+    seurat_obj$orig.ident %in% c("vehA") ~ "vehA",
     seurat_obj$orig.ident %in% c("naiveC") ~ "naive",
     seurat_obj$orig.ident %in% c("cpzC") ~ "cpz",
     TRUE ~ as.character(seurat_obj$orig.ident)
@@ -69,6 +81,141 @@ add_group_combined <- function(seurat_obj) {
 
 cell_subsets <- lapply(cell_subsets, add_group_combined)
 
+```
+
+```{r}
+print(packageVersion("Seurat"))       
+print(packageVersion("SeuratObject")) 
+```
+
+
+```{r}
+print(class(cell_subsets[["OPC"]][["RNA"]]))
+```
+
+
+
+```{r}
+#build colData
+col_names  <- colnames(combined_counts)
+split_info <- strsplit(col_names, "_", fixed = TRUE)
+cell_types2 <- sapply(split_info, function(x) x[1])  # e.g. "OPC","OPC","COP","COP",…
+treatments  <- sapply(split_info, function(x) x[2])  # e.g. "tambex","veh","tambex","veh",…
+
+coldata <- data.frame(
+  cell_type = cell_types2,
+  treatment = treatments,
+  row.names  = col_names,
+  stringsAsFactors = FALSE
+)
+
+#check treatment replicates counts in different celltype
+print(table(coldata$treatment))
+
+```
+
+```{r}
+# DEseq2
+dds <- DESeqDataSetFromMatrix(
+  countData = combined_counts,
+  colData   = coldata,
+  design    = ~ treatment
+)
+
+# filter, at least 2 replicates (different cell type) count >= 10
+keep_genes <- rowSums(counts(dds) >= 10) >= 2
+dds        <- dds[keep_genes, , drop = FALSE]
+if (nrow(dds) == 0) {
+  stop()
+}
+
+dds <- DESeq(dds)
+
+# define comparison
+comparison_list <- list(
+  c("tambex1wk", "veh1wk"),
+  c("tambexA",    "vehA"),
+  c("tambexC",    "vehC"),
+  c("naive",     "cpz")
+)
+
+deg_results <- list()
+for (cmp in comparison_list) {
+  if (all(cmp %in% levels(dds$treatment))) {
+    res <- results(dds, contrast = c("treatment", cmp[1], cmp[2]))
+    df  <- as.data.frame(res) %>%
+            tibble::rownames_to_column("gene") %>%
+            arrange(padj)
+    deg_results[[ paste0(cmp[1], "_vs_", cmp[2]) ]] <- df
+  } else {
+    warning("skip: ", paste0(cmp[1], " vs ", cmp[2]),
+            "；dds$treatment")
+  }
+}
+
+print(names(deg_results))
+head(deg_results[["tambex_vs_veh"]])
+
+```
+
+```{r}
+library(ggplot2)
+library(ggrepel)
+
+plot_volcano <- function(deg, title) {
+
+  deg$gene <- rownames(deg)
+
+  # Normalize column names 
+  if (!"avg_log2FC" %in% colnames(deg)) {
+    deg$avg_log2FC <- deg$log2FoldChange
+  }
+  if (!"p_val_adj" %in% colnames(deg)) {
+    deg$p_val_adj <- deg$padj
+  }
+
+  deg$log10p <- -log10(deg$p_val_adj)
+  deg$log10p[is.infinite(deg$log10p)] <- NA
+  deg$log10p_capped <- pmin(deg$log10p, 50)
+
+  deg$significance <- ifelse(
+    deg$p_val_adj < 0.05 & abs(deg$avg_log2FC) > 0.25,
+    "Significant", "Not significant"
+  )
+
+  deg$label <- NA
+  score <- deg$log10p * abs(deg$avg_log2FC)
+  top30 <- order(score, decreasing = TRUE)[1:30]
+  deg$label[top30] <- deg$gene[top30]
+
+  ggplot(deg, aes(x = avg_log2FC, y = log10p_capped)) +
+    geom_point(aes(color = significance), alpha = 0.5, size = 1.5) +
+    geom_text_repel(aes(label = label), size = 2.5, max.overlaps = 30, box.padding = 0.5) +
+    geom_vline(xintercept = c(-0.25, 0.25), linetype = "dotted", color = "black") +
+    geom_hline(yintercept = -log10(0.05), linetype = "dotted", color = "black") +
+    scale_color_manual(values = c("Significant" = "firebrick", "Not significant" = "grey80")) +
+    labs(
+      title = title,
+      x = "Log2 Fold Change",
+      y = "-log10 Adjusted P-value",
+      color = "Significance"
+    ) +
+    theme_minimal(base_size = 13) +
+    theme(plot.title = element_text(hjust = 0.5))
+}
+
+```
+
+```{r}
+for (cmp in names(deg_results)) {
+  df <- deg_results[[cmp]]
+  if (!"gene" %in% colnames(df)) {
+    df$gene <- rownames(df)
+  }
+  rownames(df) <- df$gene
+  p <- plot_volcano(df, title = cmp)
+  print(p)  
+}
 ```
 
 
@@ -85,12 +232,14 @@ run_pseudobulk_deg <- function(seurat_obj, comparisons,
 
   # pseudobulk aggregation
   agg <- AggregateExpression(
-           seurat_obj,
-           assays   = "RNA",
-           slot     = "counts",
-           group.by = "orig.ident"
-         )$RNA
+         seurat_obj,
+         assays   = "RNA",         # Seurat v4 用 assays
+         slot     = "counts",      # ❗改成 slot
+         group.by = "orig.ident",
+         features = rownames(seurat_obj)
+       )$RNA
   counts_mat <- round(agg)
+
 
   #sample meta
   sample_meta <- seurat_obj@meta.data %>%
@@ -136,8 +285,10 @@ comparison_list <- list(
 ```
 
 ```{r}
-deg_results <- lapply(cell_subsets, run_pseudobulk_deg,
-                      comparisons = comparison_list)
-names(deg_results) <- cell_type_list
+Layers(obj[["RNA"]])
+
+
 ```
+
+
 
