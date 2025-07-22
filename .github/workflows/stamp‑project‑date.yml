@@ -30,15 +30,15 @@ jobs:
         github-token: ${{ secrets.GITHUB_TOKEN }}
         script: |
           const query = `
-            query($owner:String!,$repo:String!,$projNum:Int!){
-              repository(owner:$owner,name:$repo) {
+            query($user:String!,$projNum:Int!){
+              user(login:$user) {
                 projectV2(number:$projNum) {
                   id
                   fields(first:50) {
                     nodes {
                       __typename
-                      ... on ProjectV2Field            { id name }
-                      ... on ProjectV2IterationField   { id name }
+                      ... on ProjectV2Field             { id name }
+                      ... on ProjectV2IterationField    { id name }
                       ... on ProjectV2SingleSelectField { id name }
                     }
                   }
@@ -48,12 +48,11 @@ jobs:
           `;
 
           const resp = await github.graphql(query, {
-            owner: context.repo.owner,
-            repo:  context.repo.repo,
+            user:    context.repo.owner,   // glyjtha
             projNum: 3
           });
 
-          const project = resp.repository.projectV2;
+          const project = resp.user.projectV2;
           const field   = project.fields.nodes.find(f => f.name === "Last commit");
           if (!field) throw new Error("Couldn't find your Date field!");
           return {
@@ -62,12 +61,11 @@ jobs:
           };
 
 
-
-
     - name: Update the card's “Last commit” field
       uses: actions/github-script@v7
       with:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+        github-token: ${{ secrets.GH_PAT }}
+
         script: |
           const itemId = context.payload.pull_request?.node_id 
                         || context.payload.issue?.node_id;
