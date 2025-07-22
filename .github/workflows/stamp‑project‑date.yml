@@ -37,13 +37,9 @@ jobs:
                   fields(first:50) {
                     nodes {
                       __typename
-                      ... on ProjectV2DateFieldConfiguration       { id name }
-                      ... on ProjectV2SingleSelectFieldConfiguration { id name }
-                      ... on ProjectV2IterationFieldConfiguration    { id name }
-                      ... on ProjectV2TextFieldConfiguration         { id name }
-                      ... on ProjectV2MilestoneFieldConfiguration    { id name }
-                      ... on ProjectV2PullRequestFieldConfiguration  { id name }
-                      # add any other field types you might have in this project
+                      ... on ProjectV2Field            { id name }
+                      ... on ProjectV2IterationField   { id name }
+                      ... on ProjectV2SingleSelectField { id name }
                     }
                   }
                 }
@@ -54,7 +50,7 @@ jobs:
           const resp = await github.graphql(query, {
             owner: context.repo.owner,
             repo:  context.repo.repo,
-            projNum: 42
+            projNum: 42           // ← your project number
           });
 
           const project = resp.repository.projectV2;
@@ -64,6 +60,7 @@ jobs:
             projectId: project.id,
             fieldId:   field.id
           };
+
 
 
 
