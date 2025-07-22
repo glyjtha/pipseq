@@ -6,7 +6,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read       # to fetch the commit
-      project: write       # to update your Project
+      projects: write       # to update your Project
     steps:
     - name: Grab the commit timestamp
       id: commit
