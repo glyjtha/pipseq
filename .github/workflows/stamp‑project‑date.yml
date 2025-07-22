@@ -30,29 +30,42 @@ jobs:
       with:
         github-token: ${{ secrets.GITHUB_TOKEN }}
         script: |
-          const project     = await github.graphql(`
-            query($owner:String!, $repo:String!, $projNum:Int!){
-              repository(owner:$owner,name:$repo){
-                projectV2(number:$projNum){
+          const query = `
+            query($owner:String!,$repo:String!,$projNum:Int!){
+              repository(owner:$owner,name:$repo) {
+                projectV2(number:$projNum) {
                   id
-                  fields(first:50){
-                    nodes { id name }
+                  fields(first:50) {
+                    nodes {
+                      __typename
+                      ... on ProjectV2DateFieldConfiguration       { id name }
+                      ... on ProjectV2SingleSelectFieldConfiguration { id name }
+                      ... on ProjectV2IterationFieldConfiguration    { id name }
+                      ... on ProjectV2TextFieldConfiguration         { id name }
+                      ... on ProjectV2MilestoneFieldConfiguration    { id name }
+                      ... on ProjectV2PullRequestFieldConfiguration  { id name }
+                      // add any other field types you might have in this project
+                    }
                   }
                 }
               }
-            }`,
-            {
-              owner: context.repo.owner,
-              repo:  context.repo.repo,
-              projNum: 1
             }
-          );
-          const proj     = project.repository.projectV2;
-          const field    = proj.fields.nodes.find(f=>f.name==="Last commit");
+          `;
+
+          const resp = await github.graphql(query, {
+            owner: context.repo.owner,
+            repo:  context.repo.repo,
+            projNum: 42     // ← swap in your project number
+          });
+
+          const project = resp.repository.projectV2;
+          const field   = project.fields.nodes.find(f => f.name === "Last commit");
+          if (!field) throw new Error("Couldn't find your Date field!");
           return {
-            projectId: proj.id,
+            projectId: project.id,
             fieldId:   field.id
           };
+
 
     - name: Update the card's “Last commit” field
       uses: actions/github-script@v7
