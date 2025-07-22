@@ -50,7 +50,7 @@ jobs:
           const resp = await github.graphql(query, {
             owner: context.repo.owner,
             repo:  context.repo.repo,
-            projNum: 42           // ← your project number
+            projNum: 1
           });
 
           const project = resp.repository.projectV2;
