@@ -10,11 +10,11 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 OL_subcluster_ids <- c(
-  "0" = "MOL1/2",
-  "1" = "MOL5/6",
+  "0" = "MOL",
+  "1" = "MOL",
   "2" = "OPC",
-  "3" = "MOL3/4",
-  "4" = "MOL_DA",
+  "3" = "MOL",
+  "4" = "MOL",
   "5" = "COP",
   "6" = "COP",
   "7" = "NFOL")
@@ -117,6 +117,7 @@ run_pseudobulk_deg <- function(seurat_obj, group_col = "group_combined", conditi
   # 3) Factor & relevel so DESeq2 will produce the correct coefficient
   sample_meta$group <- factor(sample_meta$group, levels = c(condition1, condition2))
   sample_meta$group <- relevel(sample_meta$group, ref = condition2)
+  print(sample_meta)
 
   # 4) Create DESeqDataSet
   dds <- DESeqDataSetFromMatrix(
