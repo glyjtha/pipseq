@@ -15,7 +15,6 @@ jobs:
     - name: Check out repository
       uses: actions/checkout@v3
       with:
-        # fetch full history so `git show` can look at older commits if you need
         fetch-depth: 0
 
     - name: Grab the commit timestamp
@@ -44,7 +43,7 @@ jobs:
                       ... on ProjectV2TextFieldConfiguration         { id name }
                       ... on ProjectV2MilestoneFieldConfiguration    { id name }
                       ... on ProjectV2PullRequestFieldConfiguration  { id name }
-                      // add any other field types you might have in this project
+                      # add any other field types you might have in this project
                     }
                   }
                 }
@@ -55,7 +54,7 @@ jobs:
           const resp = await github.graphql(query, {
             owner: context.repo.owner,
             repo:  context.repo.repo,
-            projNum: 42     // ← swap in your project number
+            projNum: 42
           });
 
           const project = resp.repository.projectV2;
@@ -65,6 +64,7 @@ jobs:
             projectId: project.id,
             fieldId:   field.id
           };
+
 
 
     - name: Update the card's “Last commit” field
